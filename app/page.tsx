@@ -3,33 +3,58 @@
 import React, { useState, useEffect } from "react";
 import { HeaderBar } from "@/components/HeaderBar";
 import { CanvasEditor } from "@/components/CanvasEditor";
-import { Toolbar } from "@/components/Toolbar";
-import { BottomBar } from "@/components/BottomBar";
+import { QuestionSidebar } from "@/components/QuestionSidebar";
 import { CleanSettingsModal } from "@/components/CleanSettingsModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { ExportPdfModal } from "@/components/ExportPdfModal";
 import { QuestionBox, CleanSettings } from "@/types/homework";
 import { SAMPLE_HOMEWORK_RESULT } from "@/lib/mockData";
-import { AlertCircle, X, FileText } from "lucide-react";
+import { AlertCircle, X } from "lucide-react";
+
+const BLANK_ENGLISH_SAMPLE_QUESTIONS: QuestionBox[] = [
+  {
+    id: "q_blank_1",
+    index: 1,
+    is_wrong: false,
+    topic: "一、根据音标和句意写出单词 (1~12题)",
+    box_2d: [95, 65, 415, 905],
+    handwriting_boxes: [],
+    ocr_text:
+      "一、根据音标和句意写出单词。1. -Do you know the ______ /haɪt/ of the mountain? -No, but I know it's the ______ /'haɪɪst/ in our city.\n2. People in ______ /'ɪtəli/ speak ______ /ɪ'tæliən/.\n3. Xixi is from ______ /speɪn/ and he speaks ______ /'spænɪʃ/...",
+  },
+  {
+    id: "q_blank_2",
+    index: 2,
+    is_wrong: false,
+    topic: "二、请完成以下句子 (1~10题)",
+    box_2d: [420, 65, 930, 905],
+    handwriting_boxes: [],
+    ocr_text:
+      "二、请完成以下句子。1. 一旦我们多放几天的假，我就可以有更多的时间做我喜欢的事。\n2. 每个班级有了更少的学生数，老师们可以更多地关注到每一个学生。\n3. 在我们五个人中，智也参加的社团最少...",
+  },
+];
 
 export default function HomeworkCorrectorPage() {
-  const [imageSrc, setImageSrc] = useState<string>("/samples/sample_homework.png");
+  // Default to the real blank test paper uploaded by user
+  const [imageSrc, setImageSrc] = useState<string>("/samples/sample_blank_test.jpg");
   const [questions, setQuestions] = useState<QuestionBox[]>(
-    SAMPLE_HOMEWORK_RESULT.questions
+    BLANK_ENGLISH_SAMPLE_QUESTIONS
   );
+  const [activeBoxId, setActiveBoxId] = useState<string | null>(null);
+
   const [modelStats, setModelStats] = useState({
-    modelTimeMs: SAMPLE_HOMEWORK_RESULT.meta?.modelTimeMs || 4490,
-    totalTimeMs: SAMPLE_HOMEWORK_RESULT.meta?.totalTimeMs || 4800,
-    modelName: SAMPLE_HOMEWORK_RESULT.meta?.modelName || "Ling-3.0-flash-VL",
+    modelTimeMs: 3820,
+    totalTimeMs: 4100,
+    modelName: "Ling-3.0-flash-VL",
   });
 
   const [cleanSettings, setCleanSettings] = useState<CleanSettings>({
-    eraseHandwriting: true,
+    eraseHandwriting: false,
     whiteBalance: true,
-    contrastBoost: 1.25,
+    contrastBoost: 1.3,
     removeGradesMark: true,
     highlightWrongOnly: false,
-    scannerFilter: false,
+    scannerFilter: true, // Default to true for photograph of document
     deskCrop: true,
   });
 
@@ -55,10 +80,27 @@ export default function HomeworkCorrectorPage() {
             : savedModel.split("/").pop() || savedModel,
         }));
       }
+
+      // Global paste listener: paste screenshot directly
+      const handlePaste = (e: ClipboardEvent) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf("image") !== -1) {
+            const file = items[i].getAsFile();
+            if (file) {
+              handleUploadImage(file);
+              break;
+            }
+          }
+        }
+      };
+      window.addEventListener("paste", handlePaste);
+      return () => window.removeEventListener("paste", handlePaste);
     }
   }, []);
 
-  // Analyze function
+  // Analyze function with Ling-3.0-flash-VL
   const runAnalysis = async (imgBase64: string) => {
     setIsAnalyzing(true);
     setErrorMessage(null);
@@ -123,113 +165,97 @@ export default function HomeworkCorrectorPage() {
     reader.readAsDataURL(file);
   };
 
-  // Re-analyze
-  const handleReanalyze = () => {
-    runAnalysis(imageSrc);
+  // Sample Switcher
+  const handleSelectSample = (sampleKey: "blank_english" | "math_graded") => {
+    if (sampleKey === "blank_english") {
+      setImageSrc("/samples/sample_blank_test.jpg");
+      setQuestions(BLANK_ENGLISH_SAMPLE_QUESTIONS);
+      setCleanSettings((prev) => ({
+        ...prev,
+        eraseHandwriting: false,
+        scannerFilter: true,
+      }));
+      setModelStats({
+        modelTimeMs: 3820,
+        totalTimeMs: 4100,
+        modelName: "Ling-3.0-flash-VL",
+      });
+    } else {
+      setImageSrc("/samples/sample_homework.png");
+      setQuestions(SAMPLE_HOMEWORK_RESULT.questions);
+      setCleanSettings((prev) => ({
+        ...prev,
+        eraseHandwriting: true,
+        scannerFilter: false,
+      }));
+      setModelStats({
+        modelTimeMs: 4490,
+        totalTimeMs: 4800,
+        modelName: "Ling-3.0-flash-VL",
+      });
+    }
   };
 
-  // Reset to demo
-  const handleResetDemo = () => {
-    setImageSrc("/samples/sample_homework.png");
-    setQuestions(SAMPLE_HOMEWORK_RESULT.questions);
-    setModelStats({
-      modelTimeMs: 4490,
-      totalTimeMs: 4800,
-      modelName: "Ling-3.0-flash-VL",
-    });
-    setErrorMessage(null);
+  // Duplicate box
+  const handleDuplicateBox = (id: string) => {
+    const target = questions.find((q) => q.id === id);
+    if (!target) return;
+    const [ymin, xmin, ymax, xmax] = target.box_2d;
+    const offset = Math.min(50, 1000 - ymax);
+
+    const newQ: QuestionBox = {
+      id: `q_${Date.now()}`,
+      index: questions.length + 1,
+      is_wrong: target.is_wrong,
+      topic: `${target.topic} (副本)`,
+      box_2d: [ymin + offset, xmin, Math.min(1000, ymax + offset), xmax],
+      handwriting_boxes: [],
+      ocr_text: target.ocr_text,
+    };
+    setQuestions([...questions, newQ]);
+    setActiveBoxId(newQ.id);
   };
 
-  // Load blank test paper sample
-  const handleLoadBlankTestSample = () => {
-    setImageSrc("/samples/sample_blank_test.jpg");
-    // Preset sections for the 8A U2 English dictation sheet
-    setQuestions([
-      {
-        id: "q_blank_1",
-        index: 1,
-        is_wrong: false,
-        topic: "一、根据音标和句意写出单词 (1~12题)",
-        box_2d: [95, 65, 415, 905],
-        handwriting_boxes: [],
-        ocr_text: "一、根据音标和句意写出单词。1. -Do you know the ______ /haɪt/ of the mountain?...",
-      },
-      {
-        id: "q_blank_2",
-        index: 2,
-        is_wrong: false,
-        topic: "二、请完成以下句子 (1~10题)",
-        box_2d: [420, 65, 930, 905],
-        handwriting_boxes: [],
-        ocr_text: "二、请完成以下句子。1. 一旦我们多放几天的假，我就可以有更多的时间做我喜欢的事...",
-      },
-    ]);
-    setCleanSettings((prev) => ({
-      ...prev,
-      scannerFilter: true, // Turn on scanner filter by default for camera photo
-      deskCrop: true,
-    }));
-    setModelStats({
-      modelTimeMs: 3820,
-      totalTimeMs: 4100,
-      modelName: "Ling-3.0-flash-VL",
-    });
+  // Delete box
+  const handleDeleteBox = (id: string) => {
+    const remaining = questions
+      .filter((q) => q.id !== id)
+      .map((q, idx) => ({ ...q, index: idx + 1 }));
+    setQuestions(remaining);
+    if (activeBoxId === id) setActiveBoxId(null);
+  };
+
+  // Toggle wrong
+  const handleToggleWrong = (id: string) => {
+    setQuestions(
+      questions.map((q) => (q.id === id ? { ...q, is_wrong: !q.is_wrong } : q))
+    );
   };
 
   const displayedQuestions = selectedWrongOnly
     ? questions.filter((q) => q.is_wrong)
     : questions;
 
-  const wrongCount = questions.filter((q) => q.is_wrong).length;
-
   return (
-    <main className="h-screen w-screen flex flex-col justify-between overflow-hidden bg-[#0d0f15]">
-      {/* 顶部状态栏 */}
+    <main className="h-screen w-screen flex flex-col overflow-hidden bg-[#0a0c12]">
+      {/* 顶部全局导航栏 */}
       <HeaderBar
         questionCount={questions.length}
-        candidateCount={questions.length}
         modelTime={modelStats.modelTimeMs}
         totalTime={modelStats.totalTimeMs}
         modelName={modelStats.modelName}
         isAnalyzing={isAnalyzing}
+        currentImageName={imageSrc}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenCleanSettings={() => setIsCleanSettingsOpen(true)}
+        onOpenExportPdf={() => setIsExportPdfOpen(true)}
+        onUploadImage={handleUploadImage}
+        onSelectSample={handleSelectSample}
       />
-
-      {/* 样本快速切换条 */}
-      <div className="h-8 bg-[#151924] border-b border-[#212738] px-4 flex items-center justify-between text-xs text-gray-400">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500">内置样例:</span>
-          <button
-            onClick={handleResetDemo}
-            className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-              imageSrc.includes("sample_homework")
-                ? "bg-orange-500/20 text-orange-300 border border-orange-500/40"
-                : "hover:text-gray-200"
-            }`}
-          >
-            数学错题作业 (带批改)
-          </button>
-          <button
-            onClick={handleLoadBlankTestSample}
-            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
-              imageSrc.includes("sample_blank_test")
-                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                : "hover:text-gray-200"
-            }`}
-          >
-            <FileText className="w-3 h-3" />
-            <span>英语空白默写卷 (拍照扫描打印)</span>
-          </button>
-        </div>
-
-        <div className="text-[11px] text-gray-500 hidden sm:block">
-          支持拍照阴影去除 · 纯白底化 · A4 直接打印
-        </div>
-      </div>
 
       {/* 错误提示横幅 */}
       {errorMessage && (
-        <div className="mx-4 mt-2 px-4 py-2.5 rounded-xl bg-red-950/80 border border-red-800 text-xs text-red-200 flex items-center justify-between z-30 animate-in fade-in">
+        <div className="mx-4 mt-2 px-4 py-2.5 rounded-xl bg-red-950/80 border border-red-800 text-xs text-red-200 flex items-center justify-between z-30 animate-in fade-in shrink-0">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
             <span>{errorMessage}</span>
@@ -243,39 +269,46 @@ export default function HomeworkCorrectorPage() {
         </div>
       )}
 
-      {/* 核心画布编辑器 */}
-      <CanvasEditor
-        imageSrc={imageSrc}
-        questions={displayedQuestions}
-        cleanSettings={cleanSettings}
-        isDrawingNewBox={isDrawingNewBox}
-        onQuestionsChange={setQuestions}
-        onStopDrawing={() => setIsDrawingNewBox(false)}
-      />
-
-      {/* 底部功能条与导出栏 */}
-      <div className="bg-[#12151f]/95 backdrop-blur border-t border-[#202534] z-20">
-        <Toolbar
-          isAnalyzing={isAnalyzing}
+      {/* 核心响应式工作区：大屏双栏 (左大画布 + 右清单)，小屏上下自适应 */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        {/* 左侧/中心：完全响应式缩放与自适应交互画布 */}
+        <CanvasEditor
+          imageSrc={imageSrc}
+          questions={displayedQuestions}
+          cleanSettings={cleanSettings}
           isDrawingNewBox={isDrawingNewBox}
-          isScannerActive={cleanSettings.scannerFilter}
+          activeBoxId={activeBoxId}
+          isAnalyzing={isAnalyzing}
+          onSelectBox={setActiveBoxId}
+          onQuestionsChange={setQuestions}
+          onToggleDrawingNewBox={() => setIsDrawingNewBox(!isDrawingNewBox)}
+          onStopDrawing={() => setIsDrawingNewBox(false)}
           onToggleScanner={() =>
             setCleanSettings((prev) => ({
               ...prev,
               scannerFilter: !prev.scannerFilter,
             }))
           }
-          onReanalyze={handleReanalyze}
-          onToggleDrawingNewBox={() => setIsDrawingNewBox(!isDrawingNewBox)}
-          onOpenCleanSettings={() => setIsCleanSettingsOpen(true)}
-          onUploadImage={handleUploadImage}
+          onToggleHandwriting={() =>
+            setCleanSettings((prev) => ({
+              ...prev,
+              eraseHandwriting: !prev.eraseHandwriting,
+            }))
+          }
+          onReanalyze={() => runAnalysis(imageSrc)}
         />
 
-        <BottomBar
-          wrongCount={wrongCount}
+        {/* 右侧：题目切片清单与操作面板 */}
+        <QuestionSidebar
+          questions={questions}
+          activeBoxId={activeBoxId}
           selectedWrongOnly={selectedWrongOnly}
+          onSelectBox={setActiveBoxId}
+          onToggleWrong={handleToggleWrong}
+          onDuplicate={handleDuplicateBox}
+          onDelete={handleDeleteBox}
           onToggleWrongFilter={() => setSelectedWrongOnly(!selectedWrongOnly)}
-          onExportPdf={() => setIsExportPdfOpen(true)}
+          onOpenExportPdf={() => setIsExportPdfOpen(true)}
         />
       </div>
 
@@ -290,7 +323,7 @@ export default function HomeworkCorrectorPage() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        onResetDemo={handleResetDemo}
+        onResetDemo={() => handleSelectSample("blank_english")}
       />
 
       <ExportPdfModal

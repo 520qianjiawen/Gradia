@@ -1,107 +1,144 @@
 "use client";
 
-import React from "react";
-import { Sparkles, ChevronLeft, ChevronRight, Settings } from "lucide-react";
+import React, { useRef } from "react";
+import { Sparkles, Settings, Upload, FileDown, Sliders, FileText } from "lucide-react";
 
 interface HeaderBarProps {
   questionCount: number;
-  candidateCount: number;
   modelTime?: number;
   totalTime?: number;
   modelName: string;
   isAnalyzing: boolean;
+  currentImageName: string;
   onOpenSettings: () => void;
+  onOpenCleanSettings: () => void;
+  onOpenExportPdf: () => void;
+  onUploadImage: (file: File) => void;
+  onSelectSample: (sampleKey: "blank_english" | "math_graded") => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
   questionCount,
-  candidateCount,
   modelTime,
   totalTime,
   modelName,
   isAnalyzing,
+  currentImageName,
   onOpenSettings,
+  onOpenCleanSettings,
+  onOpenExportPdf,
+  onUploadImage,
+  onSelectSample,
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      onUploadImage(file);
+    }
+  };
+
   return (
-    <header className="h-14 border-b border-[#212636] bg-[#12151f]/95 backdrop-blur px-4 flex items-center justify-between text-sm select-none z-30">
+    <header className="h-14 border-b border-[#212636] bg-[#11131a] px-4 lg:px-6 flex items-center justify-between text-sm select-none z-30 shrink-0">
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       {/* Left: Brand & Model Pill */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-orange-600 to-amber-400 flex items-center justify-center shadow-lg shadow-orange-500/20">
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-orange-600 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/25">
             <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
           </div>
-          <span className="font-bold tracking-wide text-gray-100 text-base">
-            错题速抠
-          </span>
+          <div>
+            <span className="font-extrabold tracking-wide text-gray-100 text-base">
+              Gradia
+            </span>
+            <span className="hidden md:inline-block text-[11px] text-gray-400 ml-2 font-normal border-l border-gray-700 pl-2">
+              作业订正与试卷切片工具
+            </span>
+          </div>
         </div>
 
+        {/* Model Tag */}
         <button
           onClick={onOpenSettings}
-          title="点击切换模型或配置 API Key"
-          className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-gradient-to-r from-orange-500/20 to-amber-500/10 border border-orange-500/40 text-orange-400 hover:border-orange-400 hover:text-orange-300 transition-all flex items-center gap-1.5"
+          title="点击切换视觉模型或配置 API Key"
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:border-orange-400 hover:text-orange-300 transition-all"
         >
           <Sparkles className="w-3 h-3 text-orange-400" />
           <span>{modelName || "Ling-3.0-flash-VL"}</span>
         </button>
       </div>
 
-      {/* Center: Page & Candidate count */}
-      <div className="flex items-center gap-2">
+      {/* Center: Sample switcher */}
+      <div className="hidden xl:flex items-center gap-2 bg-[#161a25] p-1 rounded-xl border border-[#232b3c]">
+        <span className="text-[11px] text-gray-400 px-2">快速载入样例:</span>
         <button
-          disabled
-          className="p-1 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30"
+          onClick={() => onSelectSample("blank_english")}
+          className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+            currentImageName.includes("blank")
+              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
         >
-          <ChevronLeft className="w-4 h-4" />
+          <FileText className="w-3.5 h-3.5" />
+          <span>8A U2 英语空白卷 (拍照原卷)</span>
         </button>
-        <div className="text-center">
-          <div className="text-xs font-semibold text-gray-200">1 / 1</div>
-          <div className="text-[10px] text-gray-400">
-            {candidateCount} 个候选框
-          </div>
-        </div>
         <button
-          disabled
-          className="p-1 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30"
+          onClick={() => onSelectSample("math_graded")}
+          className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+            currentImageName.includes("homework")
+              ? "bg-orange-500/20 text-orange-300 border border-orange-500/40 shadow-sm"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
         >
-          <ChevronRight className="w-4 h-4" />
+          <span>数学作业 (错题批改)</span>
         </button>
       </div>
 
-      {/* Right: Timing Stats & Settings button */}
-      <div className="flex items-center gap-3">
-        <div className="hidden sm:flex items-center gap-2 text-xs">
-          <span className="text-amber-400 font-semibold">{questionCount} 题</span>
-          <span className="text-gray-500">·</span>
-          {isAnalyzing ? (
-            <span className="text-orange-400 animate-pulse flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-ping" />
-              模型推理中...
-            </span>
-          ) : (
-            <div className="flex items-center gap-1 text-[11px] text-gray-400">
-              <span>
-                模型{" "}
-                <b className="text-emerald-400 font-mono">
-                  {modelTime ? (modelTime / 1000).toFixed(2) : "4.49"}s
-                </b>
-              </span>
-              <span>·</span>
-              <span>
-                端到端{" "}
-                <b className="text-cyan-400 font-mono">
-                  {totalTime ? (totalTime / 1000).toFixed(2) : "4.80"}s
-                </b>
-              </span>
-            </div>
-          )}
-        </div>
+      {/* Right: Actions (Upload, Clean settings, API Settings, Export) */}
+      <div className="flex items-center gap-2.5">
+        {/* Upload Image Button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="px-3 py-1.5 rounded-xl bg-[#1b2130] hover:bg-[#252c40] border border-[#2c354a] text-gray-200 text-xs font-medium flex items-center gap-1.5 transition"
+        >
+          <Upload className="w-3.5 h-3.5 text-orange-400" />
+          <span className="hidden sm:inline">上传试卷/作业</span>
+          <span className="sm:hidden">上传</span>
+        </button>
 
+        {/* Clean Settings */}
+        <button
+          onClick={onOpenCleanSettings}
+          title="画面清洗与扫描设置"
+          className="p-2 rounded-xl bg-[#1b2130] hover:bg-[#252c40] border border-[#2c354a] text-gray-300 hover:text-white transition"
+        >
+          <Sliders className="w-4 h-4" />
+        </button>
+
+        {/* Settings modal button */}
         <button
           onClick={onOpenSettings}
-          title="设置 API Key / 模型"
-          className="p-2 rounded-lg bg-[#1a1f2c] hover:bg-[#252b3d] text-gray-300 hover:text-white transition"
+          title="模型与 API Key 设置"
+          className="p-2 rounded-xl bg-[#1b2130] hover:bg-[#252c40] border border-[#2c354a] text-gray-300 hover:text-white transition"
         >
           <Settings className="w-4 h-4" />
+        </button>
+
+        {/* Primary Export Button */}
+        <button
+          onClick={onOpenExportPdf}
+          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 active:scale-95 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-orange-500/20 transition"
+        >
+          <FileDown className="w-4 h-4" />
+          <span>导出 PDF</span>
         </button>
       </div>
     </header>
