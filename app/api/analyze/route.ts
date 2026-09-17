@@ -1,0 +1,150 @@
+import { NextRequest, NextResponse } from "next/server";
+import { HOMEWORK_VISION_PROMPT } from "@/lib/prompt";
+import { HomeworkAnalysisResult } from "@/types/homework";
+
+export const maxDuration = 60; // Support Vercel extended serverless timeout
+
+export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+
+  try {
+    const body = await req.json();
+    const { imageBase64, apiKey, model = "inclusionai/ling-3.0-flash-vl:free" } = body;
+
+    if (!imageBase64) {
+      return NextResponse.json(
+        { success: false, error: "请提供作业图片数据 (Base64)" },
+        { status: 400 }
+      );
+    }
+
+    const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
+    if (!resolvedApiKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "未配置 OpenRouter API Key。请在页面右上角设置中输入您的 OpenRouter 密钥，或在 Vercel 环境变量中设置 OPENROUTER_API_KEY。",
+          needKey: true,
+        },
+        { status: 401 }
+      );
+    }
+
+    // Ensure format has data URI prefix
+    let formattedImageUrl = imageBase64;
+    if (!imageBase64.startsWith("data:")) {
+      formattedImageUrl = `data:image/jpeg;base64,${imageBase64}`;
+    }
+
+    const payload = {
+      model: model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: HOMEWORK_VISION_PROMPT,
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: formattedImageUrl,
+              },
+            },
+          ],
+        },
+      ],
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+    };
+
+    const modelReqStart = Date.now();
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resolvedApiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://vercel.com",
+        "X-Title": "Homework Corrector Ling 3.0",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const modelTimeMs = Date.now() - modelReqStart;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorJson;
+      try {
+        errorJson = JSON.parse(errorText);
+      } catch {
+        errorJson = null;
+      }
+      return NextResponse.json(
+        {
+          success: false,
+          error: errorJson?.error?.message || `模型请求失败 (${response.status}): ${errorText}`,
+        },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
+      return NextResponse.json(
+        { success: false, error: "模型未返回有效内容" },
+        { status: 500 }
+      );
+    }
+
+    // Robust JSON extraction
+    let cleanJson = content.trim();
+    if (cleanJson.startsWith("```json")) {
+      cleanJson = cleanJson.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+    } else if (cleanJson.startsWith("```")) {
+      cleanJson = cleanJson.replace(/^```\s*/, "").replace(/\s*```$/, "");
+    }
+
+    // Find first '{' and last '}' in case there is surrounding text
+    const firstBrace = cleanJson.indexOf("{");
+    const lastBrace = cleanJson.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleanJson = cleanJson.slice(firstBrace, lastBrace + 1);
+    }
+
+    let parsedResult: HomeworkAnalysisResult;
+    try {
+      parsedResult = JSON.parse(cleanJson);
+    } catch (parseErr) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `解析模型 JSON 输出失败: ${(parseErr as Error).message}。原始内容片段: ${cleanJson.slice(0, 200)}`,
+        },
+        { status: 500 }
+      );
+    }
+
+    const totalTimeMs = Date.now() - startTime;
+    parsedResult.meta = {
+      modelTimeMs,
+      totalTimeMs,
+      modelName: model.includes("ling") ? "Ling-3.0-flash-VL" : model,
+    };
+
+    return NextResponse.json({
+      success: true,
+      data: parsedResult,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { success: false, error: `服务器内部错误: ${message}` },
+      { status: 500 }
+    );
+  }
+}
