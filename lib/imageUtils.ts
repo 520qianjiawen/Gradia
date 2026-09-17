@@ -55,6 +55,7 @@ export function applyDocumentScanFilter(
     contrast?: number;
     threshold?: number;
     cropDeskEdges?: boolean;
+    eraseHandwriting?: boolean;
   } = {}
 ): HTMLCanvasElement {
   const naturalWidth =
@@ -138,21 +139,43 @@ export function applyDocumentScanFilter(
       const b = d[idx + 2];
       const currentLum = 0.299 * r + 0.587 * g + 0.114 * b;
 
+      // 1. Wipe out colored pen handwriting (blue pen, red pen, colored marks)
+      if (options.eraseHandwriting) {
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        if (maxC - minC > 14) {
+          d[idx] = 255;
+          d[idx + 1] = 255;
+          d[idx + 2] = 255;
+          continue;
+        }
+      }
+
       // Illumination ratio: (current / bg)
       const ratio = currentLum / bgLum;
 
-      if (ratio > 0.88) {
+      // When eraseHandwriting is true, use aggressive ratio (0.73 vs 0.88) to wipe out pencil marks
+      const cutoff = options.eraseHandwriting ? 0.73 : 0.88;
+
+      if (ratio > cutoff) {
         // Pure white paper background
         d[idx] = 255;
         d[idx + 1] = 255;
         d[idx + 2] = 255;
       } else {
-        // Printed text: enhance blackness
+        // Printed text / sharp geometry lines: enhance blackness
         const darkened = Math.max(0, Math.min(255, (currentLum - 128) * contrastFactor + 80));
-        const finalInk = darkened < 140 ? Math.round(darkened * 0.7) : darkened;
-        d[idx] = finalInk;
-        d[idx + 1] = finalInk;
-        d[idx + 2] = finalInk;
+        // If it's faint ink/pencil in eraseHandwriting mode, suppress it to white
+        if (options.eraseHandwriting && darkened > 120) {
+          d[idx] = 255;
+          d[idx + 1] = 255;
+          d[idx + 2] = 255;
+        } else {
+          const finalInk = darkened < 140 ? Math.round(darkened * 0.7) : darkened;
+          d[idx] = finalInk;
+          d[idx + 1] = finalInk;
+          d[idx + 2] = finalInk;
+        }
       }
     }
   }
@@ -323,6 +346,7 @@ export async function cropDiagramArea(
     cleanFilter?: boolean;
     contrast?: number;
     padding?: number;
+    eraseHandwriting?: boolean;
   } = {}
 ): Promise<string> {
   let img: HTMLImageElement;
@@ -391,6 +415,7 @@ export async function cropDiagramArea(
     const scanned = applyDocumentScanFilter(canvas, {
       contrast: options.contrast || 1.35,
       cropDeskEdges: false,
+      eraseHandwriting: options.eraseHandwriting ?? true,
     });
     return scanned.toDataURL("image/png");
   }

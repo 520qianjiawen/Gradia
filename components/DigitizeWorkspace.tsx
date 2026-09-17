@@ -176,6 +176,18 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
   } | null>(null);
   const [selectedTargetQuestion, setSelectedTargetQuestion] = useState<string>("");
   const [isCopiedDiagram, setIsCopiedDiagram] = useState(false);
+  const [replacingDiagramLineIdx, setReplacingDiagramLineIdx] = useState<number | null>(null);
+
+  const handleStartReplaceDiagram = (lineIdx: number) => {
+    setReplacingDiagramLineIdx(lineIdx);
+    setIsCropMode(true);
+    if (isDesktop && splitPercent < 30) {
+      setSplitPercent(50);
+    }
+    if (!isDesktop && workspaceRef.current) {
+      workspaceRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
 
   // Auto-resolve [插图: ymin, xmin, ymax, xmax] tags emitted by vision LLM
   useEffect(() => {
@@ -202,7 +214,10 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
 
       for (const t of tasks) {
         try {
-          const cropped = await cropDiagramArea(imageSrc, t.coords, { cleanFilter: true });
+          const cropped = await cropDiagramArea(imageSrc, t.coords, {
+            cleanFilter: true,
+            eraseHandwriting: true,
+          });
           if (cropped && isMounted) {
             currentMd = currentMd.replace(t.tag, `\n\n![几何配图](${cropped})\n`);
           }
@@ -314,18 +329,29 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
     try {
       const croppedBase64 = await cropDiagramArea(imgEl, pixelRect, {
         cleanFilter: true,
+        eraseHandwriting: true,
       });
       if (croppedBase64) {
-        setPendingDiagram({
-          dataUrl: croppedBase64,
-          width: Math.round(pixelRect.width),
-          height: Math.round(pixelRect.height),
-        });
-        setIsCropMode(false);
-        if (detectedQuestions.length > 0) {
-          setSelectedTargetQuestion(detectedQuestions[0].index.toString());
+        if (replacingDiagramLineIdx !== null) {
+          const lines = markdown.split("\n");
+          if (replacingDiagramLineIdx >= 0 && replacingDiagramLineIdx < lines.length) {
+            lines[replacingDiagramLineIdx] = `\n\n![几何配图](${croppedBase64})\n`;
+            onMarkdownChange(lines.join("\n"));
+          }
+          setReplacingDiagramLineIdx(null);
+          setIsCropMode(false);
         } else {
-          setSelectedTargetQuestion("end");
+          setPendingDiagram({
+            dataUrl: croppedBase64,
+            width: Math.round(pixelRect.width),
+            height: Math.round(pixelRect.height),
+          });
+          setIsCropMode(false);
+          if (detectedQuestions.length > 0) {
+            setSelectedTargetQuestion(detectedQuestions[0].index.toString());
+          } else {
+            setSelectedTargetQuestion("end");
+          }
         }
       }
     } catch (err) {
@@ -336,6 +362,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
   const handleCancelCrop = (e: React.PointerEvent) => {
     setIsCropping(false);
     setCropBox(null);
+    setReplacingDiagramLineIdx(null);
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
@@ -554,20 +581,27 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
 
   // Print A4
   const handlePrint = () => {
-    window.print();
+    if (viewTab !== "preview") {
+      setViewTab("preview");
+      setTimeout(() => {
+        window.print();
+      }, 150);
+    } else {
+      window.print();
+    }
   };
 
   return (
     <div
       ref={workspaceRef}
-      className={`flex-1 w-full h-full flex flex-col lg:flex-row overflow-hidden bg-[#090b10] ${
+      className={`workspace-container flex-1 w-full h-full flex flex-col lg:flex-row overflow-hidden bg-[#090b10] ${
         isDragging ? "select-none cursor-col-resize" : ""
       }`}
     >
       {/* Left Column: Original Photo with Zoom */}
       <div
         style={isDesktop ? { width: `${splitPercent}%` } : undefined}
-        className="w-full h-[40vh] lg:h-full border-b lg:border-b-0 border-[#1f2433] bg-[#0c0e14] relative flex flex-col overflow-hidden shrink-0"
+        className="workspace-left-pane print-hidden print:hidden w-full h-[40vh] lg:h-full border-b lg:border-b-0 border-[#1f2433] bg-[#0c0e14] relative flex flex-col overflow-hidden shrink-0"
       >
         <div className="h-10 px-4 border-b border-[#1f2433] bg-[#12151e] flex items-center justify-between text-xs text-gray-400 shrink-0 select-none">
           <div className="flex items-center gap-2">
@@ -586,7 +620,10 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
             {/* Diagram Crop Tool Toggle */}
             <button
               onClick={() => {
-                setIsCropMode((prev) => !prev);
+                setIsCropMode((prev) => {
+                  if (prev) setReplacingDiagramLineIdx(null);
+                  return !prev;
+                });
                 setIsCropping(false);
                 setCropBox(null);
               }}
@@ -656,9 +693,25 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
         >
           {/* Crop Mode Banner */}
           {isCropMode && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-orange-600/90 text-white text-xs px-3.5 py-1.5 rounded-full shadow-xl pointer-events-none flex items-center gap-1.5 animate-in fade-in border border-orange-400/40 whitespace-nowrap">
-              <Scissors className="w-3.5 h-3.5 animate-pulse" />
-              <span>请在原卷几何图上按住鼠标拉框截取（松开自动增白去透印）</span>
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-orange-600/95 text-white text-xs px-3.5 py-1.5 rounded-full shadow-xl flex items-center gap-2 animate-in fade-in border border-orange-400/40 whitespace-nowrap">
+              <Scissors className="w-3.5 h-3.5 animate-pulse shrink-0" />
+              <span>
+                {replacingDiagramLineIdx !== null
+                  ? "正在重新截取插图：请在原图上按住拉框，松开即可替换"
+                  : "请在原卷几何图上按住鼠标拉框截取（松开自动增白去印）"}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsCropMode(false);
+                  setReplacingDiagramLineIdx(null);
+                  setCropBox(null);
+                }}
+                className="ml-1 px-2 py-0.5 bg-black/30 hover:bg-black/50 text-[11px] rounded-md font-bold transition-colors cursor-pointer"
+              >
+                取消
+              </button>
             </div>
           )}
 
@@ -704,7 +757,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
         onPointerDown={handlePointerDown}
         onDoubleClick={() => setSplitPercent(50)}
         title="按住左右拖拽调节窗口宽度，双击恢复 50:50 居中"
-        className={`hidden lg:flex w-2 bg-[#141824] hover:bg-orange-500 active:bg-orange-500 cursor-col-resize items-center justify-center transition-colors relative z-30 select-none group shrink-0 ${
+        className={`workspace-divider print-hidden print:hidden hidden lg:flex w-2 bg-[#141824] hover:bg-orange-500 active:bg-orange-500 cursor-col-resize items-center justify-center transition-colors relative z-30 select-none group shrink-0 ${
           isDragging
             ? "bg-orange-500 shadow-lg shadow-orange-500/50"
             : "hover:shadow-md border-x border-[#1f2433]"
@@ -722,10 +775,10 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
 
       {/* Right Column: Digitized Paper (Markdown / Word / Print) */}
       <div
-        className="w-full lg:flex-1 h-[60vh] lg:h-full flex flex-col bg-[#11131a] overflow-hidden min-w-0"
+        className="workspace-right-pane w-full lg:flex-1 h-[60vh] lg:h-full flex flex-col bg-[#11131a] overflow-hidden min-w-0"
       >
         {/* Workspace Action Toolbar */}
-        <div className="p-3 border-b border-[#1f2433] bg-[#141824] flex flex-wrap items-center justify-between gap-2 text-xs shrink-0 select-none">
+        <div className="workspace-toolbar print-hidden print:hidden p-3 border-b border-[#1f2433] bg-[#141824] flex flex-wrap items-center justify-between gap-2 text-xs shrink-0 select-none">
           {/* View Tab Switcher & Handwriting Erase Checkbox */}
           <div className="flex items-center gap-2.5 flex-wrap">
             <div className="flex items-center gap-1 bg-[#1a202e] p-1 rounded-xl border border-[#283248]">
@@ -836,10 +889,10 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
         </div>
 
         {/* Workspace Body: Natural Block Scrolling */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#0d0f17]">
+        <div className="workspace-body flex-1 overflow-y-auto p-4 sm:p-8 bg-[#0d0f17]">
           {viewTab === "preview" ? (
             /* Pristine A4 Exam Paper Style Preview */
-            <div className="w-full max-w-[760px] mx-auto bg-white text-gray-900 p-8 sm:p-14 shadow-2xl rounded-sm font-sans min-h-full h-fit space-y-4 print:p-0 print:shadow-none print:m-0 print:w-full print:max-w-none">
+            <div className="printable-exam-paper print-page w-full max-w-[760px] mx-auto bg-white text-gray-900 p-8 sm:p-14 shadow-2xl rounded-sm font-sans min-h-full h-fit space-y-4 print:p-0 print:shadow-none print:m-0 print:w-full print:max-w-none">
               <div
                 className={`text-[11px] px-3 py-1.5 rounded flex items-center gap-1.5 print:hidden border ${
                   eraseHandwriting
@@ -870,6 +923,17 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                   const trimmed = line.trim();
                   if (!trimmed) {
                     return <div key={idx} className="h-2" />;
+                  }
+
+                  if (trimmed === "[分页]" || trimmed === "[换页]" || trimmed === "<!-- pagebreak -->") {
+                    return (
+                      <div
+                        key={idx}
+                        className="print-page-break my-4 border-t border-dashed border-gray-300 print:border-none relative flex items-center justify-center text-[10px] text-gray-400 print:hidden"
+                      >
+                        <span className="bg-white px-2">--- 打印在此处分页 ---</span>
+                      </div>
+                    );
                   }
 
                   if (trimmed === "---" || trimmed === "***") {
@@ -971,36 +1035,59 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                     if (imgMatch) {
                       const alt = imgMatch[1] || "试卷插图";
                       const src = imgMatch[2];
+                      const isTargetBeingReplaced = replacingDiagramLineIdx === idx;
                       return (
                         <div
                           key={idx}
-                          className="my-3 flex flex-col items-center justify-center p-2.5 rounded-xl bg-gray-50/90 border border-gray-200/90 group relative max-w-md mx-auto print:my-2 print:border-none print:p-0"
+                          className="print-avoid-break my-4 flex flex-col items-center justify-center group relative max-w-md mx-auto print:my-2"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={src}
-                            alt={alt}
-                            className="max-h-60 w-auto object-contain rounded shadow-sm border border-gray-300 bg-white print:border-none print:shadow-none"
+                            alt=""
+                            onClick={() => handleStartReplaceDiagram(idx)}
+                            title="点击可直接在左侧原图上重新框选截取此插图"
+                            className={`max-h-64 w-auto object-contain bg-white cursor-pointer transition-all duration-150 ${
+                              isTargetBeingReplaced
+                                ? "ring-2 ring-orange-500 rounded shadow-md scale-[1.01]"
+                                : "hover:ring-2 hover:ring-orange-400/80 hover:rounded"
+                            }`}
                           />
-                          {alt && (
-                            <span className="text-[11px] text-gray-500 mt-1.5 font-medium print:text-[10px]">
-                              {alt}
-                            </span>
-                          )}
-                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-gray-900/85 p-1 rounded-lg print:hidden">
+                          {/* Quick Action Overlay on Hover */}
+                          <div className="absolute -top-3 right-0 sm:right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 bg-gray-900/90 backdrop-blur-sm px-2.5 py-1 rounded-lg shadow-xl border border-gray-700 text-xs print:hidden z-20">
                             <button
-                              onClick={() => {
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartReplaceDiagram(idx);
+                              }}
+                              title="在左侧原图上按住鼠标重新拉框，松开后自动替换此插图"
+                              className="px-2 py-0.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-[11px] font-medium flex items-center gap-1 transition-colors shadow-sm"
+                            >
+                              <Scissors className="w-3 h-3" />
+                              <span>重新框选截取</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 const newLines = markdown.split("\n");
                                 newLines.splice(idx, 1);
                                 onMarkdownChange(newLines.join("\n"));
                               }}
                               title="从试卷中删除此插图"
-                              className="p-1 text-red-300 hover:text-red-100 hover:bg-red-500/30 rounded text-xs flex items-center gap-1"
+                              className="p-1 text-gray-400 hover:text-red-300 hover:bg-red-500/20 rounded transition-colors"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>删除</span>
                             </button>
                           </div>
+                          {/* Active replacement indicator */}
+                          {isTargetBeingReplaced && (
+                            <div className="mt-1.5 px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-700 text-[11px] font-medium flex items-center gap-1.5 border border-orange-200 animate-pulse print:hidden">
+                              <Scissors className="w-3 h-3 text-orange-600" />
+                              <span>请在左侧原图拖拽拉框，松开后将直接替换...</span>
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -1067,7 +1154,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                   return (
                     <div
                       key={idx}
-                      className={`text-xs sm:text-sm text-gray-900 leading-relaxed ${
+                      className={`print-avoid-break text-xs sm:text-sm text-gray-900 leading-relaxed ${
                         isNumbered
                           ? "mt-6 pt-2 pl-1 font-semibold text-gray-950 border-t border-gray-100/90 first:border-none first:pt-0 first:mt-2"
                           : "mt-1.5 pl-4 sm:pl-6 font-normal text-gray-850"

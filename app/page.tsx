@@ -191,7 +191,20 @@ export default function HomeworkCorrectorPage() {
         }),
       });
 
-      const data = await res.json();
+      let data: any;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        if (!res.ok) {
+          if (res.status === 504) {
+            throw new Error("云端识别超时（试卷图元较多），请稍后重试");
+          }
+          throw new Error(`服务响应异常 (HTTP ${res.status})，请检查网络或 API Key`);
+        }
+        throw new Error("返回数据格式异常，请稍后重试");
+      }
+
       if (!res.ok || !data.success) {
         if (data.needKey) {
           setIsSettingsOpen(true);
@@ -251,7 +264,19 @@ export default function HomeworkCorrectorPage() {
         }),
       });
 
-      const data = await res.json();
+      let data: any;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        if (!res.ok) {
+          if (res.status === 504) {
+            throw new Error("云端分析超时，请稍后重试或使用更小图片");
+          }
+          throw new Error(`服务响应异常 (HTTP ${res.status})，请检查网络或 API Key`);
+        }
+        throw new Error("返回数据格式异常，请稍后重试");
+      }
 
       if (!res.ok || !data.success) {
         if (data.needKey) {
@@ -390,7 +415,7 @@ export default function HomeworkCorrectorPage() {
 
       {/* 错误提示横幅 */}
       {errorMessage && (
-        <div className="mx-4 mt-2 px-4 py-2.5 rounded-xl bg-red-950/80 border border-red-800 text-xs text-red-200 flex items-center justify-between z-30 animate-in fade-in shrink-0">
+        <div className="print-hidden print:hidden mx-4 mt-2 px-4 py-2.5 rounded-xl bg-red-950/80 border border-red-800 text-xs text-red-200 flex items-center justify-between z-30 animate-in fade-in shrink-0">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
             <span>{errorMessage}</span>

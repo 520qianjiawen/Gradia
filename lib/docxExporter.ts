@@ -86,7 +86,14 @@ export async function exportMarkdownToDocx(
           })
         );
 
-        if (altText) {
+        const isGenericCaption =
+          !altText ||
+          altText === "几何配图" ||
+          altText === "试卷插图" ||
+          altText === "插图" ||
+          altText.trim() === "";
+
+        if (altText && !isGenericCaption) {
           children.push(
             new Paragraph({
               alignment: AlignmentType.CENTER,

@@ -52,23 +52,97 @@ body {
 
 /* Printable Exam Paper Styling */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+
+  html,
   body {
     background: #ffffff !important;
     color: #000000 !important;
+    height: auto !important;
+    min-height: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
+
+  main {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide app chrome, headers, modals, toolbars, sidebars, dividers, error banners */
   header,
+  nav,
   aside,
   .print-hidden,
-  .no-print {
+  .no-print,
+  [data-print-hide="true"],
+  .workspace-left-pane,
+  .workspace-divider,
+  .workspace-toolbar {
     display: none !important;
   }
-  .print-page {
-    background: #ffffff !important;
-    box-shadow: none !important;
+
+  /* Expand workspace containers to full print flow */
+  .workspace-container,
+  .workspace-right-pane,
+  .workspace-body {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
+  }
+
+  /* The actual white exam paper */
+  .printable-exam-paper {
+    display: block !important;
     width: 100% !important;
     max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .printable-exam-paper img {
+    max-width: 100% !important;
+    height: auto !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Keep question blocks intact across page breaks */
+  .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Explicit page break */
+  .print-page-break {
+    break-before: page !important;
+    page-break-before: always !important;
+    height: 0 !important;
+    margin: 0 !important;
+    border: none !important;
   }
 }
