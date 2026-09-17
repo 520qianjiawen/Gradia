@@ -17,6 +17,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { exportMarkdownToDocx } from "@/lib/docxExporter";
+import katex from "katex";
 
 interface DigitizeWorkspaceProps {
   imageSrc: string;
@@ -24,6 +25,43 @@ interface DigitizeWorkspaceProps {
   isDigitizing: boolean;
   onMarkdownChange: (md: string) => void;
   onRedigitize: () => void;
+}
+
+/**
+ * Helper to render inline LaTeX math formulas like $...$ safely with KaTeX
+ */
+function renderLineWithMath(text: string): React.ReactNode {
+  // If no math delimiter, return plain string
+  if (!text.includes("$")) {
+    return text;
+  }
+
+  const parts = text.split(/(\$[^$]+\$)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
+          const math = part.slice(1, -1);
+          try {
+            const html = katex.renderToString(math, {
+              throwOnError: false,
+              displayMode: false,
+            });
+            return (
+              <span
+                key={i}
+                dangerouslySetInnerHTML={{ __html: html }}
+                className="inline-math mx-0.5 text-gray-950"
+              />
+            );
+          } catch {
+            return <span key={i}>{part}</span>;
+          }
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
 }
 
 export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
@@ -159,7 +197,6 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
-            {/* Redigitize */}
             <button
               onClick={onRedigitize}
               disabled={isDigitizing}
@@ -172,7 +209,6 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
               <span>{isDigitizing ? "识别中..." : "重新识别"}</span>
             </button>
 
-            {/* Copy MD */}
             <button
               onClick={handleCopy}
               className="px-2.5 py-1.5 rounded-xl bg-[#1d2332] hover:bg-[#252d40] border border-[#2b354c] text-gray-200 flex items-center gap-1.5 transition active:scale-95"
@@ -190,7 +226,6 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
               )}
             </button>
 
-            {/* Export Word */}
             <button
               onClick={handleExportDocx}
               disabled={isExportingDocx}
@@ -205,7 +240,6 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
               <span>导出 Word (.docx)</span>
             </button>
 
-            {/* Print A4 */}
             <button
               onClick={handlePrint}
               className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 text-white font-bold flex items-center gap-1.5 shadow-md shadow-orange-500/20 transition active:scale-95"
@@ -217,11 +251,12 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* Workspace Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex justify-center bg-[#0d0f17]">
+        {/* Workspace Body: Natural Block Scrolling to prevent background clipping */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#0d0f17]">
           {viewTab === "preview" ? (
             /* Pristine A4 Exam Paper Style Preview */
-            <div className="w-full max-w-[760px] bg-white text-gray-900 p-8 sm:p-12 shadow-2xl rounded-sm font-sans min-h-[950px] space-y-4 print:p-0 print:shadow-none print:m-0 print:w-full print:max-w-none">
+            /* Using mx-auto, h-fit, and min-h-full guarantees white background wraps 100% of content */
+            <div className="w-full max-w-[760px] mx-auto bg-white text-gray-900 p-8 sm:p-14 shadow-2xl rounded-sm font-sans min-h-full h-fit space-y-4 print:p-0 print:shadow-none print:m-0 print:w-full print:max-w-none">
               <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded flex items-center gap-1.5 print:hidden">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                 <span>
@@ -229,7 +264,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                 </span>
               </div>
 
-              <div className="space-y-3 leading-relaxed">
+              <div className="space-y-3 leading-relaxed text-gray-900">
                 {markdown.split("\n").map((line, idx) => {
                   const trimmed = line.trim();
                   if (!trimmed) {
@@ -259,7 +294,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                     return (
                       <h2
                         key={idx}
-                        className="text-base sm:text-lg font-bold text-gray-800 pt-3 pb-1 border-b border-gray-200"
+                        className="text-base sm:text-lg font-bold text-gray-900 pt-3 pb-1 border-b border-gray-200"
                       >
                         {trimmed.replace(/^##\s+/, "")}
                       </h2>
@@ -271,7 +306,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                     return (
                       <h3
                         key={idx}
-                        className="text-sm font-bold text-gray-800 pt-2"
+                        className="text-sm font-bold text-gray-900 pt-2"
                       >
                         {trimmed.replace(/^###\s+/, "")}
                       </h3>
@@ -283,23 +318,25 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                     return (
                       <div
                         key={idx}
-                        className="text-xs sm:text-sm text-gray-600 text-right font-medium py-1"
+                        className="text-xs sm:text-sm text-gray-700 text-right font-medium py-1"
                       >
                         {trimmed.replace(/\*\*/g, "")}
                       </div>
                     );
                   }
 
-                  // Normal Question item with Underlines
+                  // Normal Question or Math Line
                   const isNumbered = /^\d+\.\s/.test(trimmed);
+                  const cleanText = trimmed.replace(/\*\*/g, "");
+
                   return (
                     <div
                       key={idx}
-                      className={`text-xs sm:text-sm text-gray-800 font-normal ${
-                        isNumbered ? "mt-2.5 pl-1" : "mt-1 pl-4"
+                      className={`text-xs sm:text-sm text-gray-900 font-normal leading-relaxed ${
+                        isNumbered ? "mt-3 pl-1 font-medium" : "mt-1 pl-4"
                       }`}
                     >
-                      {trimmed.replace(/\*\*/g, "")}
+                      {renderLineWithMath(cleanText)}
                     </div>
                   );
                 })}
@@ -307,11 +344,11 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
             </div>
           ) : (
             /* Markdown Source Editor */
-            <div className="w-full max-w-3xl h-full flex flex-col space-y-2">
+            <div className="w-full max-w-3xl mx-auto h-full flex flex-col space-y-2">
               <div className="text-xs text-gray-400 flex items-center justify-between">
                 <span>Markdown 源码编辑（修改后实时生效）:</span>
                 <span className="text-[11px] text-gray-500">
-                  支持标准 Markdown 语法与音标
+                  支持标准 Markdown 语法与 LaTeX 公式
                 </span>
               </div>
               <textarea
