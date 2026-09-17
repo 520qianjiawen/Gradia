@@ -459,3 +459,63 @@ export async function exportFullBlankTestPdf(
   doc.addImage(scannedDataUrl, "PNG", posX, posY, renderW, renderH);
   doc.save(options.filename || `高清试卷打印版_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
+
+/**
+ * Compresses and resizes an image before sending to Vision LLM APIs
+ * Keeps max dimension <= 1600px and reduces JPEG size from 10MB to ~300KB
+ */
+export async function compressImageForUpload(
+  fileOrBase64: File | string,
+  maxDimension: number = 1600,
+  quality: number = 0.85
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      let { width, height } = img;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(typeof fileOrBase64 === "string" ? fileOrBase64 : "");
+        return;
+      }
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const compressedDataUrl = canvas.toDataURL("image/jpeg", quality);
+      resolve(compressedDataUrl);
+    };
+
+    img.onerror = (err) => {
+      reject(err);
+    };
+
+    if (typeof fileOrBase64 === "string") {
+      img.src = fileOrBase64;
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(fileOrBase64);
+    }
+  });
+}
+

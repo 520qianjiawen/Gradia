@@ -4,6 +4,50 @@ import { HomeworkAnalysisResult } from "@/types/homework";
 
 export const maxDuration = 60; // Support Vercel extended serverless timeout
 
+async function callOpenRouter(
+  model: string,
+  formattedImageUrl: string,
+  apiKey: string
+) {
+  const payload = {
+    model: model,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: HOMEWORK_VISION_PROMPT,
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: formattedImageUrl,
+            },
+          },
+        ],
+      },
+    ],
+    temperature: 0.1,
+    // Note: Do NOT include response_format: { type: "json_object" }
+    // because third-party providers on OpenRouter (vLLM/Baseten) do not support it
+    // and will crash with "Provider returned error".
+  };
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://vercel.com",
+      "X-Title": "Homework Corrector Ling 3.0",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return response;
+}
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
@@ -31,46 +75,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure format has data URI prefix
     let formattedImageUrl = imageBase64;
     if (!imageBase64.startsWith("data:")) {
       formattedImageUrl = `data:image/jpeg;base64,${imageBase64}`;
     }
 
-    const payload = {
-      model: model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: HOMEWORK_VISION_PROMPT,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: formattedImageUrl,
-              },
-            },
-          ],
-        },
-      ],
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-    };
-
     const modelReqStart = Date.now();
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resolvedApiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://vercel.com",
-        "X-Title": "Homework Corrector Ling 3.0",
-      },
-      body: JSON.stringify(payload),
-    });
+    let response = await callOpenRouter(model, formattedImageUrl, resolvedApiKey);
+    let activeModel = model;
+
+    // If primary model failed with provider error/overload, try robust fallback free models
+    if (!response.ok && model.includes("ling")) {
+      console.warn(
+        `Primary model ${model} failed with ${response.status}. Attempting fallback to Qwen 2.5 VL...`
+      );
+      const fallbackModel = "qwen/qwen-2.5-vl-72b-instruct:free";
+      const fallbackResponse = await callOpenRouter(
+        fallbackModel,
+        formattedImageUrl,
+        resolvedApiKey
+      );
+      if (fallbackResponse.ok) {
+        response = fallbackResponse;
+        activeModel = fallbackModel;
+      }
+    }
 
     const modelTimeMs = Date.now() - modelReqStart;
 
@@ -82,10 +111,18 @@ export async function POST(req: NextRequest) {
       } catch {
         errorJson = null;
       }
+
+      const rawMsg = errorJson?.error?.message || errorText;
+      let friendlyMsg = rawMsg;
+      if (rawMsg.includes("Provider returned error")) {
+        friendlyMsg =
+          "上游模型节点暂时繁忙或无响应 (Provider returned error)。建议在右上角 ⚙️ 设置中切换模型 (如 Qwen 2.5 VL 或 Gemini 2.0 Flash) 后重试。";
+      }
+
       return NextResponse.json(
         {
           success: false,
-          error: errorJson?.error?.message || `模型请求失败 (${response.status}): ${errorText}`,
+          error: friendlyMsg,
         },
         { status: response.status }
       );
@@ -109,7 +146,6 @@ export async function POST(req: NextRequest) {
       cleanJson = cleanJson.replace(/^```\s*/, "").replace(/\s*```$/, "");
     }
 
-    // Find first '{' and last '}' in case there is surrounding text
     const firstBrace = cleanJson.indexOf("{");
     const lastBrace = cleanJson.lastIndexOf("}");
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -133,7 +169,9 @@ export async function POST(req: NextRequest) {
     parsedResult.meta = {
       modelTimeMs,
       totalTimeMs,
-      modelName: model.includes("ling") ? "Ling-3.0-flash-VL" : model,
+      modelName: activeModel.includes("ling")
+        ? "Ling-3.0-flash-VL"
+        : activeModel.split("/").pop() || activeModel,
     };
 
     return NextResponse.json({

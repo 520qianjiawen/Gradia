@@ -4,11 +4,14 @@ import React, { useState, useEffect } from "react";
 import { HeaderBar } from "@/components/HeaderBar";
 import { CanvasEditor } from "@/components/CanvasEditor";
 import { QuestionSidebar } from "@/components/QuestionSidebar";
+import { DigitizeWorkspace } from "@/components/DigitizeWorkspace";
 import { CleanSettingsModal } from "@/components/CleanSettingsModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { ExportPdfModal } from "@/components/ExportPdfModal";
 import { QuestionBox, CleanSettings } from "@/types/homework";
 import { SAMPLE_HOMEWORK_RESULT } from "@/lib/mockData";
+import { SAMPLE_BLANK_TEST_MARKDOWN } from "@/lib/sampleMarkdown";
+import { compressImageForUpload } from "@/lib/imageUtils";
 import { AlertCircle, X } from "lucide-react";
 
 const BLANK_ENGLISH_SAMPLE_QUESTIONS: QuestionBox[] = [
@@ -20,7 +23,7 @@ const BLANK_ENGLISH_SAMPLE_QUESTIONS: QuestionBox[] = [
     box_2d: [95, 65, 415, 905],
     handwriting_boxes: [],
     ocr_text:
-      "一、根据音标和句意写出单词。1. -Do you know the ______ /haɪt/ of the mountain? -No, but I know it's the ______ /'haɪɪst/ in our city.\n2. People in ______ /'ɪtəli/ speak ______ /ɪ'tæliən/.\n3. Xixi is from ______ /speɪn/ and he speaks ______ /'spænɪʃ/...",
+      "一、根据音标和句意写出单词。1. -Do you know the ______ /haɪt/ of the mountain? -No, but I know it's the ______ /'haɪɪst/ in our city.\n2. People in ______ /'ɪtəli/ speak ______ /ɪ'tæliən/...",
   },
   {
     id: "q_blank_2",
@@ -30,13 +33,26 @@ const BLANK_ENGLISH_SAMPLE_QUESTIONS: QuestionBox[] = [
     box_2d: [420, 65, 930, 905],
     handwriting_boxes: [],
     ocr_text:
-      "二、请完成以下句子。1. 一旦我们多放几天的假，我就可以有更多的时间做我喜欢的事。\n2. 每个班级有了更少的学生数，老师们可以更多地关注到每一个学生。\n3. 在我们五个人中，智也参加的社团最少...",
+      "二、请完成以下句子。1. 一旦我们多放几天的假，我就可以有更多的时间做我喜欢的事。\n2. 每个班级有了更少的学生数，老师们可以更多地关注到每一个学生...",
   },
 ];
 
 export default function HomeworkCorrectorPage() {
-  // Default to the real blank test paper uploaded by user
+  // Mode: "digitize_doc" (Word/Markdown 电子化) or "crop_correct" (切片框选订正)
+  const [currentMode, setCurrentMode] = useState<"digitize_doc" | "crop_correct">(
+    "digitize_doc"
+  );
+
+  // Current active worksheet image
   const [imageSrc, setImageSrc] = useState<string>("/samples/sample_blank_test.jpg");
+
+  // Digitize Markdown State
+  const [digitizedMarkdown, setDigitizedMarkdown] = useState<string>(
+    SAMPLE_BLANK_TEST_MARKDOWN
+  );
+  const [isDigitizing, setIsDigitizing] = useState(false);
+
+  // Questions for Crop & Correction Mode
   const [questions, setQuestions] = useState<QuestionBox[]>(
     BLANK_ENGLISH_SAMPLE_QUESTIONS
   );
@@ -54,7 +70,7 @@ export default function HomeworkCorrectorPage() {
     contrastBoost: 1.3,
     removeGradesMark: true,
     highlightWrongOnly: false,
-    scannerFilter: true, // Default to true for photograph of document
+    scannerFilter: true,
     deskCrop: true,
   });
 
@@ -100,7 +116,50 @@ export default function HomeworkCorrectorPage() {
     }
   }, []);
 
-  // Analyze function with Ling-3.0-flash-VL
+  // Digitize API call (Photo -> Markdown)
+  const runDigitize = async (imgBase64: string) => {
+    setIsDigitizing(true);
+    setErrorMessage(null);
+
+    try {
+      const apiKey =
+        typeof window !== "undefined"
+          ? localStorage.getItem("openrouter_api_key") || ""
+          : "";
+      const model =
+        typeof window !== "undefined"
+          ? localStorage.getItem("openrouter_model") ||
+            "inclusionai/ling-3.0-flash-vl:free"
+          : "inclusionai/ling-3.0-flash-vl:free";
+
+      const res = await fetch("/api/digitize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: imgBase64,
+          apiKey,
+          model,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (data.needKey) {
+          setIsSettingsOpen(true);
+        }
+        throw new Error(data.error || "试卷数字化失败，请检查网络或 API Key");
+      }
+
+      setDigitizedMarkdown(data.data.markdown || "");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
+      setIsDigitizing(false);
+    }
+  };
+
+  // Analyze function (for Bounding Boxes)
   const runAnalysis = async (imgBase64: string) => {
     setIsAnalyzing(true);
     setErrorMessage(null);
@@ -132,7 +191,7 @@ export default function HomeworkCorrectorPage() {
         if (data.needKey) {
           setIsSettingsOpen(true);
         }
-        throw new Error(data.error || "识别作业失败，请检查网络或 API Key");
+        throw new Error(data.error || "切片识别失败，请检查网络或 API Key");
       }
 
       const result = data.data;
@@ -152,47 +211,70 @@ export default function HomeworkCorrectorPage() {
     }
   };
 
-  // Upload custom image
-  const handleUploadImage = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      if (result) {
-        setImageSrc(result);
-        runAnalysis(result);
+  // Upload custom image with automatic compression
+  const handleUploadImage = async (file: File) => {
+    try {
+      const compressedBase64 = await compressImageForUpload(file);
+      setImageSrc(compressedBase64);
+      if (currentMode === "digitize_doc") {
+        runDigitize(compressedBase64);
+      } else {
+        runAnalysis(compressedBase64);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (result) {
+          setImageSrc(result);
+          if (currentMode === "digitize_doc") {
+            runDigitize(result);
+          } else {
+            runAnalysis(result);
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   // Sample Switcher
   const handleSelectSample = (sampleKey: "blank_english" | "math_graded") => {
     if (sampleKey === "blank_english") {
       setImageSrc("/samples/sample_blank_test.jpg");
+      setDigitizedMarkdown(SAMPLE_BLANK_TEST_MARKDOWN);
       setQuestions(BLANK_ENGLISH_SAMPLE_QUESTIONS);
       setCleanSettings((prev) => ({
         ...prev,
         eraseHandwriting: false,
         scannerFilter: true,
       }));
-      setModelStats({
-        modelTimeMs: 3820,
-        totalTimeMs: 4100,
-        modelName: "Ling-3.0-flash-VL",
-      });
     } else {
       setImageSrc("/samples/sample_homework.png");
       setQuestions(SAMPLE_HOMEWORK_RESULT.questions);
+      setDigitizedMarkdown(`# 数学作业：方向与位置练习卷
+
+**姓名: ________________    得分: ________**
+
+---
+
+## 练习题
+
+1. 在老虎馆、猩猩馆、狮林这三个场所中任选一个，描述它的位置。  
+   ____________________________________________________________________________
+
+2. 描述位置时，需要明确的三个要素是（方向）、（角度）和（距离）。
+
+3. 若蛇馆在大象馆的南偏东 25° 方向 300m 处，则大象馆在蛇馆的（________________）方向（________）m 处。
+
+4. 一艘渔船在海上遇险，向搜救中心发出求救信号。搜救中心的信号显示，渔船的位置如下图。请写一写，渔船向搜救中心发出了怎样的信号？  
+   ____________________________________________________________________________
+`);
       setCleanSettings((prev) => ({
         ...prev,
         eraseHandwriting: true,
         scannerFilter: false,
       }));
-      setModelStats({
-        modelTimeMs: 4490,
-        totalTimeMs: 4800,
-        modelName: "Ling-3.0-flash-VL",
-      });
     }
   };
 
@@ -240,11 +322,11 @@ export default function HomeworkCorrectorPage() {
     <main className="h-screen w-screen flex flex-col overflow-hidden bg-[#0a0c12]">
       {/* 顶部全局导航栏 */}
       <HeaderBar
+        currentMode={currentMode}
+        onModeChange={setCurrentMode}
         questionCount={questions.length}
-        modelTime={modelStats.modelTimeMs}
-        totalTime={modelStats.totalTimeMs}
         modelName={modelStats.modelName}
-        isAnalyzing={isAnalyzing}
+        isAnalyzing={isAnalyzing || isDigitizing}
         currentImageName={imageSrc}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenCleanSettings={() => setIsCleanSettingsOpen(true)}
@@ -269,48 +351,58 @@ export default function HomeworkCorrectorPage() {
         </div>
       )}
 
-      {/* 核心响应式工作区：大屏双栏 (左大画布 + 右清单)，小屏上下自适应 */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
-        {/* 左侧/中心：完全响应式缩放与自适应交互画布 */}
-        <CanvasEditor
+      {/* 主工作区 */}
+      {currentMode === "digitize_doc" ? (
+        /* 模式一：试卷转电子版 (Markdown / Word / 纯净打印) */
+        <DigitizeWorkspace
           imageSrc={imageSrc}
-          questions={displayedQuestions}
-          cleanSettings={cleanSettings}
-          isDrawingNewBox={isDrawingNewBox}
-          activeBoxId={activeBoxId}
-          isAnalyzing={isAnalyzing}
-          onSelectBox={setActiveBoxId}
-          onQuestionsChange={setQuestions}
-          onToggleDrawingNewBox={() => setIsDrawingNewBox(!isDrawingNewBox)}
-          onStopDrawing={() => setIsDrawingNewBox(false)}
-          onToggleScanner={() =>
-            setCleanSettings((prev) => ({
-              ...prev,
-              scannerFilter: !prev.scannerFilter,
-            }))
-          }
-          onToggleHandwriting={() =>
-            setCleanSettings((prev) => ({
-              ...prev,
-              eraseHandwriting: !prev.eraseHandwriting,
-            }))
-          }
-          onReanalyze={() => runAnalysis(imageSrc)}
+          markdown={digitizedMarkdown}
+          isDigitizing={isDigitizing}
+          onMarkdownChange={setDigitizedMarkdown}
+          onRedigitize={() => runDigitize(imageSrc)}
         />
+      ) : (
+        /* 模式二：错题切片与订正画布 */
+        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+          <CanvasEditor
+            imageSrc={imageSrc}
+            questions={displayedQuestions}
+            cleanSettings={cleanSettings}
+            isDrawingNewBox={isDrawingNewBox}
+            activeBoxId={activeBoxId}
+            isAnalyzing={isAnalyzing}
+            onSelectBox={setActiveBoxId}
+            onQuestionsChange={setQuestions}
+            onToggleDrawingNewBox={() => setIsDrawingNewBox(!isDrawingNewBox)}
+            onStopDrawing={() => setIsDrawingNewBox(false)}
+            onToggleScanner={() =>
+              setCleanSettings((prev) => ({
+                ...prev,
+                scannerFilter: !prev.scannerFilter,
+              }))
+            }
+            onToggleHandwriting={() =>
+              setCleanSettings((prev) => ({
+                ...prev,
+                eraseHandwriting: !prev.eraseHandwriting,
+              }))
+            }
+            onReanalyze={() => runAnalysis(imageSrc)}
+          />
 
-        {/* 右侧：题目切片清单与操作面板 */}
-        <QuestionSidebar
-          questions={questions}
-          activeBoxId={activeBoxId}
-          selectedWrongOnly={selectedWrongOnly}
-          onSelectBox={setActiveBoxId}
-          onToggleWrong={handleToggleWrong}
-          onDuplicate={handleDuplicateBox}
-          onDelete={handleDeleteBox}
-          onToggleWrongFilter={() => setSelectedWrongOnly(!selectedWrongOnly)}
-          onOpenExportPdf={() => setIsExportPdfOpen(true)}
-        />
-      </div>
+          <QuestionSidebar
+            questions={questions}
+            activeBoxId={activeBoxId}
+            selectedWrongOnly={selectedWrongOnly}
+            onSelectBox={setActiveBoxId}
+            onToggleWrong={handleToggleWrong}
+            onDuplicate={handleDuplicateBox}
+            onDelete={handleDeleteBox}
+            onToggleWrongFilter={() => setSelectedWrongOnly(!selectedWrongOnly)}
+            onOpenExportPdf={() => setIsExportPdfOpen(true)}
+          />
+        </div>
+      )}
 
       {/* 弹窗组件 */}
       <CleanSettingsModal

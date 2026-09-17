@@ -23,7 +23,12 @@ const PRESET_MODELS = [
   {
     id: "qwen/qwen-2.5-vl-72b-instruct:free",
     name: "Qwen 2.5 VL 72B (Free 备选)",
-    desc: "阿里开源视觉语言大模型",
+    desc: "阿里通义开源视觉大模型，复杂试卷 OCR 与中文理解稳定",
+  },
+  {
+    id: "google/gemini-2.0-flash-exp:free",
+    name: "Gemini 2.0 Flash (Free 备选)",
+    desc: "谷歌超快速原生多模态大模型，响应快、极少宕机",
   },
 ];
 
