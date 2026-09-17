@@ -10,7 +10,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { ExportPdfModal } from "@/components/ExportPdfModal";
 import { QuestionBox, CleanSettings } from "@/types/homework";
 import { SAMPLE_HOMEWORK_RESULT } from "@/lib/mockData";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle, X, FileText } from "lucide-react";
 
 export default function HomeworkCorrectorPage() {
   const [imageSrc, setImageSrc] = useState<string>("/samples/sample_homework.png");
@@ -26,9 +26,11 @@ export default function HomeworkCorrectorPage() {
   const [cleanSettings, setCleanSettings] = useState<CleanSettings>({
     eraseHandwriting: true,
     whiteBalance: true,
-    contrastBoost: 1.15,
+    contrastBoost: 1.25,
     removeGradesMark: true,
     highlightWrongOnly: false,
+    scannerFilter: false,
+    deskCrop: true,
   });
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -115,7 +117,6 @@ export default function HomeworkCorrectorPage() {
       const result = e.target?.result as string;
       if (result) {
         setImageSrc(result);
-        // Automatically analyze the newly uploaded image
         runAnalysis(result);
       }
     };
@@ -139,7 +140,42 @@ export default function HomeworkCorrectorPage() {
     setErrorMessage(null);
   };
 
-  // Filtered questions to display if user toggled "仅看错题"
+  // Load blank test paper sample
+  const handleLoadBlankTestSample = () => {
+    setImageSrc("/samples/sample_blank_test.jpg");
+    // Preset sections for the 8A U2 English dictation sheet
+    setQuestions([
+      {
+        id: "q_blank_1",
+        index: 1,
+        is_wrong: false,
+        topic: "一、根据音标和句意写出单词 (1~12题)",
+        box_2d: [95, 65, 415, 905],
+        handwriting_boxes: [],
+        ocr_text: "一、根据音标和句意写出单词。1. -Do you know the ______ /haɪt/ of the mountain?...",
+      },
+      {
+        id: "q_blank_2",
+        index: 2,
+        is_wrong: false,
+        topic: "二、请完成以下句子 (1~10题)",
+        box_2d: [420, 65, 930, 905],
+        handwriting_boxes: [],
+        ocr_text: "二、请完成以下句子。1. 一旦我们多放几天的假，我就可以有更多的时间做我喜欢的事...",
+      },
+    ]);
+    setCleanSettings((prev) => ({
+      ...prev,
+      scannerFilter: true, // Turn on scanner filter by default for camera photo
+      deskCrop: true,
+    }));
+    setModelStats({
+      modelTimeMs: 3820,
+      totalTimeMs: 4100,
+      modelName: "Ling-3.0-flash-VL",
+    });
+  };
+
   const displayedQuestions = selectedWrongOnly
     ? questions.filter((q) => q.is_wrong)
     : questions;
@@ -158,6 +194,38 @@ export default function HomeworkCorrectorPage() {
         isAnalyzing={isAnalyzing}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
+
+      {/* 样本快速切换条 */}
+      <div className="h-8 bg-[#151924] border-b border-[#212738] px-4 flex items-center justify-between text-xs text-gray-400">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-500">内置样例:</span>
+          <button
+            onClick={handleResetDemo}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+              imageSrc.includes("sample_homework")
+                ? "bg-orange-500/20 text-orange-300 border border-orange-500/40"
+                : "hover:text-gray-200"
+            }`}
+          >
+            数学错题作业 (带批改)
+          </button>
+          <button
+            onClick={handleLoadBlankTestSample}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 ${
+              imageSrc.includes("sample_blank_test")
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                : "hover:text-gray-200"
+            }`}
+          >
+            <FileText className="w-3 h-3" />
+            <span>英语空白默写卷 (拍照扫描打印)</span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-gray-500 hidden sm:block">
+          支持拍照阴影去除 · 纯白底化 · A4 直接打印
+        </div>
+      </div>
 
       {/* 错误提示横幅 */}
       {errorMessage && (
@@ -190,6 +258,13 @@ export default function HomeworkCorrectorPage() {
         <Toolbar
           isAnalyzing={isAnalyzing}
           isDrawingNewBox={isDrawingNewBox}
+          isScannerActive={cleanSettings.scannerFilter}
+          onToggleScanner={() =>
+            setCleanSettings((prev) => ({
+              ...prev,
+              scannerFilter: !prev.scannerFilter,
+            }))
+          }
           onReanalyze={handleReanalyze}
           onToggleDrawingNewBox={() => setIsDrawingNewBox(!isDrawingNewBox)}
           onOpenCleanSettings={() => setIsCleanSettingsOpen(true)}

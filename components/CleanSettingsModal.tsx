@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X, Eraser, Sun, Contrast, CheckCircle2 } from "lucide-react";
+import { X, Eraser, Sun, Contrast, CheckCircle2, Scan, Crop } from "lucide-react";
 import { CleanSettings } from "@/types/homework";
 
 interface CleanSettingsModalProps {
@@ -26,9 +26,9 @@ export const CleanSettingsModal: React.FC<CleanSettingsModalProps> = ({
         <div className="px-5 py-4 border-b border-[#252c3d] flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400">
-              <Eraser className="w-4 h-4" />
+              <Scan className="w-4 h-4" />
             </div>
-            <h3 className="font-bold text-base text-gray-100">画面清洗与订正设置</h3>
+            <h3 className="font-bold text-base text-gray-100">画面清洗与扫描打印设置</h3>
           </div>
           <button
             onClick={onClose}
@@ -39,16 +39,64 @@ export const CleanSettingsModal: React.FC<CleanSettingsModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-5 space-y-4 text-sm">
-          {/* 擦除手写笔迹 */}
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#1f2535] border border-[#2d364d]">
-            <div className="space-y-0.5">
-              <div className="font-semibold text-gray-100 flex items-center gap-1.5">
-                <Eraser className="w-4 h-4 text-orange-400" />
-                <span>擦除手写笔迹（白底化重做）</span>
+        <div className="p-5 space-y-3.5 text-sm">
+          {/* 文档扫描滤镜 (去阴影/纯白底化) */}
+          <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#1f2535] border border-orange-500/40 shadow-sm shadow-orange-500/5">
+            <div className="space-y-0.5 max-w-[270px]">
+              <div className="font-semibold text-orange-300 flex items-center gap-1.5">
+                <Scan className="w-4 h-4 text-orange-400" />
+                <span>试卷扫描增强（去阴影/白底化）</span>
               </div>
               <p className="text-xs text-gray-400">
-                利用 Ling-3.0 定位的手写区域，自动抹去学生作答与红笔批改痕迹
+                针对拍照试卷，自动消除手机光斑与不均匀阴影，将纸张背景提亮为纯白，锐化黑字
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.scannerFilter}
+                onChange={(e) =>
+                  onUpdateSettings({ ...settings, scannerFilter: e.target.checked })
+                }
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-[#323b52] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+            </label>
+          </div>
+
+          {/* 自动切除桌面杂边 */}
+          <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#1f2535] border border-[#2d364d]">
+            <div className="space-y-0.5 max-w-[270px]">
+              <div className="font-semibold text-gray-100 flex items-center gap-1.5">
+                <Crop className="w-4 h-4 text-cyan-400" />
+                <span>切除外围桌面黑边/垫板</span>
+              </div>
+              <p className="text-xs text-gray-400">
+                自动裁切拍照时卷入的桌面、黑色切割垫及边缘阴影
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.deskCrop}
+                onChange={(e) =>
+                  onUpdateSettings({ ...settings, deskCrop: e.target.checked })
+                }
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-[#323b52] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+            </label>
+          </div>
+
+          {/* 擦除手写笔迹 */}
+          <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#1f2535] border border-[#2d364d]">
+            <div className="space-y-0.5 max-w-[270px]">
+              <div className="font-semibold text-gray-100 flex items-center gap-1.5">
+                <Eraser className="w-4 h-4 text-orange-400" />
+                <span>擦除手写笔迹（错题作业用）</span>
+              </div>
+              <p className="text-xs text-gray-400">
+                自动抹去学生作答与红笔批注，还原空白横线
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -66,13 +114,13 @@ export const CleanSettingsModal: React.FC<CleanSettingsModalProps> = ({
 
           {/* 纸张白平衡增白 */}
           <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#1f2535] border border-[#2d364d]">
-            <div className="space-y-0.5">
+            <div className="space-y-0.5 max-w-[270px]">
               <div className="font-semibold text-gray-100 flex items-center gap-1.5">
                 <Sun className="w-4 h-4 text-amber-400" />
                 <span>纸张去黄增白</span>
               </div>
               <p className="text-xs text-gray-400">
-                提亮拍照发暗的作业纸张背景，导出打印更清晰省墨
+                整体提亮发暗发黄的纸面，打印省墨
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">

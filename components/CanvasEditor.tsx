@@ -3,7 +3,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { QuestionBox, NormalizedBox, CleanSettings } from "@/types/homework";
 import { BoundingBoxTag } from "./BoundingBoxTag";
-import { boxToPixelRect, pixelRectToBox } from "@/lib/imageUtils";
+import { boxToPixelRect, pixelRectToBox, applyDocumentScanFilter } from "@/lib/imageUtils";
 
 type HandlePosition = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -32,6 +32,8 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [initialBox, setInitialBox] = useState<NormalizedBox | null>(null);
 
+  const [displaySrc, setDisplaySrc] = useState<string>(imageSrc);
+
   // For drawing new box
   const [newBoxDraft, setNewBoxDraft] = useState<{
     startX: number;
@@ -44,6 +46,34 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     width: 0,
     height: 0,
   });
+
+  // Scanner filter live preview
+  useEffect(() => {
+    let isMounted = true;
+    if (cleanSettings.scannerFilter) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = imageSrc;
+      img.onload = () => {
+        if (!isMounted) return;
+        const canvas = applyDocumentScanFilter(img, {
+          contrast: cleanSettings.contrastBoost || 1.3,
+          cropDeskEdges: cleanSettings.deskCrop,
+        });
+        setDisplaySrc(canvas.toDataURL("image/jpeg", 0.9));
+      };
+    } else {
+      setDisplaySrc(imageSrc);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    imageSrc,
+    cleanSettings.scannerFilter,
+    cleanSettings.deskCrop,
+    cleanSettings.contrastBoost,
+  ]);
 
   // Keep track of image rendered size
   const updateSize = () => {
@@ -74,7 +104,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     const target = questions.find((q) => q.id === id);
     if (!target) return;
     const [ymin, xmin, ymax, xmax] = target.box_2d;
-    const height = ymax - ymin;
     const offset = Math.min(60, 1000 - ymax);
 
     const newQ: QuestionBox = {
@@ -156,7 +185,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       xmax = xmin + boxW;
       ymax = ymin + boxH;
     } else {
-      // Handles
       if (dragMode.includes("n")) ymin = Math.max(0, Math.min(origYmax - 20, origYmin + deltaY));
       if (dragMode.includes("s")) ymax = Math.min(1000, Math.max(origYmin + 20, origYmax + deltaY));
       if (dragMode.includes("w")) xmin = Math.max(0, Math.min(origXmax - 20, origXmin + deltaX));
@@ -197,7 +225,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         const newQuestion: QuestionBox = {
           id: `q_${Date.now()}`,
           index: questions.length + 1,
-          is_wrong: true,
+          is_wrong: false,
           topic: "新增题目",
           box_2d,
           handwriting_boxes: [],
@@ -237,26 +265,27 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
   return (
     <div
-      className="relative flex-1 flex items-center justify-center p-2 sm:p-6 overflow-hidden bg-[#0d0f15]"
+      className="relative flex-1 flex items-center justify-center p-2 sm:p-4 overflow-hidden bg-[#0d0f15]"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
-      {/* Centered Image Container with mobile-frame aesthetics matching screenshot */}
       <div
         ref={containerRef}
         onMouseDown={handleContainerMouseDown}
-        className={`relative max-w-[460px] w-full max-h-[78vh] flex items-center justify-center rounded-2xl overflow-hidden shadow-2xl border border-[#252a38] bg-[#151822] select-none ${
+        className={`relative max-w-[480px] w-full max-h-[78vh] flex items-center justify-center rounded-2xl overflow-hidden shadow-2xl border border-[#252a38] bg-[#151822] select-none ${
           isDrawingNewBox ? "cursor-crosshair ring-2 ring-orange-500" : ""
         }`}
       >
-        {/* The Homework Photo */}
+        {/* The Homework or Blank Test Photo */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           ref={imgRef}
-          src={imageSrc}
+          src={displaySrc}
           alt="Homework Paper"
           onLoad={updateSize}
-          className="w-full h-auto object-contain max-h-[78vh] rounded-xl pointer-events-none"
+          className={`w-full h-auto object-contain max-h-[78vh] rounded-xl pointer-events-none transition-opacity duration-300 ${
+            cleanSettings.scannerFilter ? "bg-white" : ""
+          }`}
         />
 
         {/* Render Detected Question Boxes */}
@@ -286,7 +315,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                   isWrong ? "bg-red-500/[0.04]" : "bg-blue-500/[0.04]"
                 }`}
               >
-                {/* Header Tag with Title & + / x buttons */}
+                {/* Header Tag */}
                 <BoundingBoxTag
                   question={q}
                   onToggleWrong={handleToggleWrong}
@@ -297,19 +326,17 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 {/* 8 Anchor Handles */}
                 {renderHandles(q.id)}
 
-                {/* Render Handwriting Boxes inside this Question */}
+                {/* Handwriting Boxes */}
                 {q.handwriting_boxes.map((hwBox, hwIdx) => {
                   const hwRect = boxToPixelRect(
                     hwBox,
                     containerSize.width,
                     containerSize.height
                   );
-                  // Local coordinates relative to question box
                   const localLeft = hwRect.x - rect.x;
                   const localTop = hwRect.y - rect.y;
 
                   if (cleanSettings.eraseHandwriting) {
-                    // Erased view: whiteout / paper color patch
                     return (
                       <div
                         key={hwIdx}
@@ -328,7 +355,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                     );
                   }
 
-                  // Non-erased view: show amber/yellow dashed box
                   return (
                     <div
                       key={hwIdx}
@@ -351,7 +377,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
             );
           })}
 
-        {/* Draft box when user is manually dragging to add a new box */}
+        {/* Draft box */}
         {isDrawingNewBox && newBoxDraft && (
           <div
             style={{
@@ -364,13 +390,28 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           />
         )}
 
-        {/* Floating Detection Status Toast (Matching screenshot bottom banner) */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-xl bg-[#1c2230]/95 backdrop-blur-md border border-[#2d354a] shadow-xl text-xs sm:text-sm text-gray-200 pointer-events-none z-20 flex items-center gap-1.5 whitespace-nowrap soft-toast">
-          <span>识别到</span>
-          <b className="text-white font-semibold">{questions.length}</b>
-          <span>道题，其中</span>
-          <b className="text-[#ff453a] font-bold">{wrongCount}</b>
-          <span>道做错</span>
+        {/* Floating Detection Status Toast */}
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-[#1c2230]/95 backdrop-blur-md border border-[#2d354a] shadow-xl text-xs text-gray-200 pointer-events-none z-20 flex items-center gap-1.5 whitespace-nowrap soft-toast">
+          {questions.length === 0 ? (
+            <span>可点击下方【重新识别】或【手动框】框选题目</span>
+          ) : (
+            <>
+              <span>识别到</span>
+              <b className="text-white font-semibold">{questions.length}</b>
+              <span>道题</span>
+              {wrongCount > 0 ? (
+                <>
+                  <span>，其中</span>
+                  <b className="text-[#ff453a] font-bold">{wrongCount}</b>
+                  <span>道做错</span>
+                </>
+              ) : (
+                <span className="text-emerald-400 font-medium ml-1">
+                  (未发现错题 / 空白练习卷)
+                </span>
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>

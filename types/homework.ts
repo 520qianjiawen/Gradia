@@ -30,4 +30,6 @@ export interface CleanSettings {
   contrastBoost: number; // 1.0 to 1.5
   removeGradesMark: boolean;
   highlightWrongOnly: boolean;
+  scannerFilter: boolean; // Document scanner mode (remove phone shadows, pure white paper)
+  deskCrop: boolean; // Auto-crop outside desk borders
 }

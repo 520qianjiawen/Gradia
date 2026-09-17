@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useRef } from "react";
-import { RefreshCw, PlusSquare, Sliders, ImagePlus } from "lucide-react";
+import { RefreshCw, PlusSquare, Sliders, ImagePlus, Scan } from "lucide-react";
 
 interface ToolbarProps {
   isAnalyzing: boolean;
   isDrawingNewBox: boolean;
+  isScannerActive: boolean;
+  onToggleScanner: () => void;
   onReanalyze: () => void;
   onToggleDrawingNewBox: () => void;
   onOpenCleanSettings: () => void;
@@ -15,6 +17,8 @@ interface ToolbarProps {
 export const Toolbar: React.FC<ToolbarProps> = ({
   isAnalyzing,
   isDrawingNewBox,
+  isScannerActive,
+  onToggleScanner,
   onReanalyze,
   onToggleDrawingNewBox,
   onOpenCleanSettings,
@@ -30,7 +34,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   };
 
   return (
-    <div className="w-full max-w-[480px] mx-auto px-4 py-2 flex items-center justify-between gap-2 text-xs text-gray-300">
+    <div className="w-full max-w-[500px] mx-auto px-3 py-2 flex items-center justify-between gap-2 text-xs text-gray-300">
       <input
         type="file"
         ref={fileInputRef}
@@ -43,7 +47,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <button
         onClick={onReanalyze}
         disabled={isAnalyzing}
-        className="flex-1 py-2.5 px-2 rounded-xl bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border border-[#2d3448] flex items-center justify-center gap-1.5 transition text-gray-200 font-medium disabled:opacity-50"
+        className="flex-1 py-2.5 px-1.5 rounded-xl bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border border-[#2d3448] flex items-center justify-center gap-1 transition text-gray-200 font-medium disabled:opacity-50"
       >
         <RefreshCw
           className={`w-3.5 h-3.5 text-gray-300 ${isAnalyzing ? "animate-spin text-orange-400" : ""}`}
@@ -51,23 +55,37 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <span>重新识别</span>
       </button>
 
+      {/* 试卷去阴影/扫描增强 */}
+      <button
+        onClick={onToggleScanner}
+        title="针对拍照试卷：一键去黄、去阴影、纯白底化"
+        className={`flex-1 py-2.5 px-1.5 rounded-xl border flex items-center justify-center gap-1 transition font-medium ${
+          isScannerActive
+            ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm"
+            : "bg-[#1e2332] hover:bg-[#282f42] border-[#2d3448] text-gray-200"
+        }`}
+      >
+        <Scan className={`w-3.5 h-3.5 ${isScannerActive ? "text-emerald-400" : "text-gray-300"}`} />
+        <span>{isScannerActive ? "已去阴影" : "去拍照阴影"}</span>
+      </button>
+
       {/* 手动加框 */}
       <button
         onClick={onToggleDrawingNewBox}
-        className={`flex-1 py-2.5 px-2 rounded-xl border flex items-center justify-center gap-1.5 transition font-medium ${
+        className={`flex-1 py-2.5 px-1.5 rounded-xl border flex items-center justify-center gap-1 transition font-medium ${
           isDrawingNewBox
             ? "bg-orange-500/20 border-orange-500 text-orange-300"
-            : "bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border-[#2d3448] text-gray-200"
+            : "bg-[#1e2332] hover:bg-[#282f42] border-[#2d3448] text-gray-200"
         }`}
       >
         <PlusSquare className="w-3.5 h-3.5 text-gray-300" />
-        <span>{isDrawingNewBox ? "松开完成" : "+ 手动加框"}</span>
+        <span>{isDrawingNewBox ? "松开完成" : "+ 手动框"}</span>
       </button>
 
       {/* 清洗设置 */}
       <button
         onClick={onOpenCleanSettings}
-        className="flex-1 py-2.5 px-2 rounded-xl bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border border-[#2d3448] flex items-center justify-center gap-1.5 transition text-gray-200 font-medium"
+        className="flex-1 py-2.5 px-1.5 rounded-xl bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border border-[#2d3448] flex items-center justify-center gap-1 transition text-gray-200 font-medium"
       >
         <Sliders className="w-3.5 h-3.5 text-gray-300" />
         <span>清洗设置</span>
@@ -76,7 +94,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       {/* 加照片 */}
       <button
         onClick={() => fileInputRef.current?.click()}
-        className="flex-1 py-2.5 px-2 rounded-xl bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border border-[#2d3448] flex items-center justify-center gap-1.5 transition text-gray-200 font-medium"
+        className="flex-1 py-2.5 px-1.5 rounded-xl bg-[#1e2332] hover:bg-[#282f42] active:bg-[#181c28] border border-[#2d3448] flex items-center justify-center gap-1 transition text-gray-200 font-medium"
       >
         <ImagePlus className="w-3.5 h-3.5 text-gray-300" />
         <span>+ 加照片</span>
