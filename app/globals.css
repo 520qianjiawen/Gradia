@@ -49,3 +49,26 @@ body {
 .soft-toast {
   animation: soft-pulse 3s infinite ease-in-out;
 }
+
+/* Printable Exam Paper Styling */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  header,
+  aside,
+  .print-hidden,
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}

@@ -71,6 +71,10 @@ export const SAMPLE_MATH_BLANK_MARKDOWN = `# 数学作业：方向与位置练�
 
 4. 一艘渔船在海上遇险，向搜救中心发出求救信号。搜救中心的信号显示，渔船的位置如下图。请写一写，渔船向搜救中心发出了怎样的信号？  
    ____________________________________________________________________________
+
+5. 如图，已知 $\triangle ABC$ 中，BF、CF 分别平分 $\angle ABC$ 与 $\angle ACB$：  
+   (1) 求证： $\angle BFC = 90^\circ + \frac{1}{2}\angle A$ ;  
+   (2) 若 $\angle A = 60^\circ$，求 $\angle BFC$ 的度数： ________________。
 `;
 
 export const SAMPLE_MATH_WITH_HANDWRITING_MARKDOWN = `# 数学作业：方向与位置练习卷
@@ -90,5 +94,12 @@ export const SAMPLE_MATH_WITH_HANDWRITING_MARKDOWN = `# 数学作业：方向与
 
 4. 一艘渔船在海上遇险，向搜救中心发出求救信号。搜救中心的信号显示，渔船的位置如下图。请写一写，渔船向搜救中心发出了怎样的信号？  
    *作答：* 渔船在搜救中心的南偏西 45° 方向 150 海里处发出求救信号。
+
+5. 如图，已知 $\triangle ABC$ 中，BF、CF 分别平分 $\angle ABC$ 与 $\angle ACB$：  
+   (1) 求证： $\angle BFC = 90^\circ + \frac{1}{2}\angle A$ ;  
+   *作答：* 证明：因为 BF、CF 为角平分线，所以 $\angle 1 + \angle 2 = \frac{1}{2}(180^\circ - \angle A)$。故 $\angle BFC = 180^\circ - (\angle 1 + \angle 2) = 90^\circ + \frac{1}{2}\angle A$。  
+   (2) 若 $\angle A = 60^\circ$，求 $\angle BFC$ 的度数：  
+   *作答：* $\angle BFC = 90^\circ + \frac{1}{2} \times 60^\circ = 120^\circ$。
 `;
+
 

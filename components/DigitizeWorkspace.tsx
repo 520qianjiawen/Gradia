@@ -17,9 +17,20 @@ import {
   Sparkles,
   Eraser,
   Move,
+  Scissors,
+  Crop,
+  Trash2,
+  X,
+  Plus,
 } from "lucide-react";
 import { exportMarkdownToDocx } from "@/lib/docxExporter";
-import { normalizeMathDelimiters, renderLatexToHtml } from "@/lib/mathUtils";
+import { cropDiagramArea } from "@/lib/imageUtils";
+import {
+  normalizeMathDelimiters,
+  renderLatexToHtml,
+  latexToReadableUnicode,
+  parseChoiceOptions,
+} from "@/lib/mathUtils";
 
 interface DigitizeWorkspaceProps {
   imageSrc: string;
@@ -32,33 +43,51 @@ interface DigitizeWorkspaceProps {
 }
 
 /**
- * Helper to render inline LaTeX math formulas ($...$, $$...$$, \(...\), etc.) safely with KaTeX
+ * Helper to render inline LaTeX math formulas ($...$, $$...$$, etc.), markdown bold (**...**), and clean typography
  */
-function renderLineWithMath(rawText: string): React.ReactNode {
+function renderFormattedLine(rawText: string): React.ReactNode {
+  if (!rawText) return null;
+
   const normalized = normalizeMathDelimiters(rawText);
 
-  // If no math indicator, return original text
-  if (
-    !normalized.includes("$") &&
-    !normalized.includes("\\frac{") &&
-    !normalized.includes("\\sqrt{")
-  ) {
-    return rawText;
+  // If no math or markdown indicators, clean plain text directly
+  const hasFormatting =
+    normalized.includes("$") ||
+    normalized.includes("\\frac{") ||
+    normalized.includes("\\sqrt{") ||
+    normalized.includes("**") ||
+    normalized.includes("\\angle") ||
+    normalized.includes("\\triangle") ||
+    normalized.includes("^\\circ");
+
+  if (!hasFormatting) {
+    return latexToReadableUnicode(normalized);
   }
 
-  // Matches $$...$$, $...$, or unwrapped LaTeX commands like \frac{...}{...}
-  const mathRegex =
-    /(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$|\\frac\{[^{}]+\}\{[^{}]+\}(?:\s*(?:\\[a-zA-Z]+|[a-zA-Z0-9]))?)/g;
-  const parts = normalized.split(mathRegex);
+  // Matches $$...$$, $...$, unwrapped \frac{...}{...}, unwrapped \sqrt{...}, or markdown bold **...**
+  const tokenRegex =
+    /(\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$|\\frac\{[^{}]+\}\{[^{}]+\}|\\sqrt\{[^{}]+\}|\*\*[^*]+?\*\*)/g;
+  const parts = normalized.split(tokenRegex);
 
   return (
     <>
       {parts.map((part, i) => {
         if (!part) return null;
 
+        // 1. Markdown bold: **text**
+        if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+          const inner = part.slice(2, -2);
+          return (
+            <strong key={i} className="font-bold text-gray-900">
+              {renderFormattedLine(inner)}
+            </strong>
+          );
+        }
+
+        // 2. Math Formula
         let isMath = false;
-        const mathContent = part.trim();
         let displayMode = false;
+        const mathContent = part.trim();
 
         if (
           mathContent.startsWith("$$") &&
@@ -73,7 +102,10 @@ function renderLineWithMath(rawText: string): React.ReactNode {
           mathContent.length > 2
         ) {
           isMath = true;
-        } else if (mathContent.startsWith("\\frac{")) {
+        } else if (
+          mathContent.startsWith("\\frac{") ||
+          mathContent.startsWith("\\sqrt{")
+        ) {
           isMath = true;
         }
 
@@ -87,7 +119,7 @@ function renderLineWithMath(rawText: string): React.ReactNode {
                 className={
                   displayMode
                     ? "block my-2 text-center"
-                    : "inline-block px-0.5 align-baseline"
+                    : "inline-block px-0.5 align-baseline text-gray-900"
                 }
               />
             );
@@ -102,7 +134,8 @@ function renderLineWithMath(rawText: string): React.ReactNode {
           );
         }
 
-        return <span key={i}>{part}</span>;
+        // 3. Plain text: convert any loose LaTeX commands to readable unicode
+        return <span key={i}>{latexToReadableUnicode(part)}</span>;
       })}
     </>
   );
@@ -124,9 +157,285 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef<{ clientX: number; clientY: number; panX: number; panY: number } | null>(null);
+  const imageViewportRef = useRef<HTMLDivElement>(null);
+  const imgElementRef = useRef<HTMLImageElement>(null);
+
+  // Manual Crop Diagram Tool
+  const [isCropMode, setIsCropMode] = useState(false);
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropBox, setCropBox] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const [pendingDiagram, setPendingDiagram] = useState<{
+    dataUrl: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [selectedTargetQuestion, setSelectedTargetQuestion] = useState<string>("");
+  const [isCopiedDiagram, setIsCopiedDiagram] = useState(false);
+
+  // Auto-resolve [插图: ymin, xmin, ymax, xmax] tags emitted by vision LLM
+  useEffect(() => {
+    const diagramRegex = /\[插图:\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]/g;
+    if (!diagramRegex.test(markdown)) return;
+
+    let isMounted = true;
+    const processAutoDiagrams = async () => {
+      let currentMd = markdown;
+      let match;
+      const re = /\[插图:\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]/g;
+      const tasks: { tag: string; coords: [number, number, number, number] }[] = [];
+      while ((match = re.exec(markdown)) !== null) {
+        tasks.push({
+          tag: match[0],
+          coords: [
+            parseInt(match[1], 10),
+            parseInt(match[2], 10),
+            parseInt(match[3], 10),
+            parseInt(match[4], 10),
+          ],
+        });
+      }
+
+      for (const t of tasks) {
+        try {
+          const cropped = await cropDiagramArea(imageSrc, t.coords, { cleanFilter: true });
+          if (cropped && isMounted) {
+            currentMd = currentMd.replace(t.tag, `\n\n![几何配图](${cropped})\n`);
+          }
+        } catch (err) {
+          console.warn("Failed to auto-crop diagram:", err);
+        }
+      }
+
+      if (isMounted && currentMd !== markdown) {
+        onMarkdownChange(currentMd);
+      }
+    };
+
+    processAutoDiagrams();
+    return () => {
+      isMounted = false;
+    };
+  }, [markdown, imageSrc, onMarkdownChange]);
+
+  // Detected questions list from markdown
+  const detectedQuestions = React.useMemo(() => {
+    const lines = markdown.split("\n");
+    const result: { index: number; title: string }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (
+        /^(?:\d+[\.、]|\(\d+\)|（\d+）|[①②③④⑤⑥⑦⑧⑨⑩]|##?\s*(?:\d+[\.、]|\(\d+\)|（\d+）))/.test(
+          line
+        )
+      ) {
+        const clean = line.replace(/^[#\*\s]+/, "").slice(0, 35);
+        result.push({ index: i, title: clean });
+      }
+    }
+    return result;
+  }, [markdown]);
+
+  // Crop pointer event handlers
+  const handlePointerDownCrop = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    setIsCropping(true);
+    setCropBox({
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+    });
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handlePointerMoveCrop = (e: React.PointerEvent) => {
+    if (!isCropping || !cropBox) return;
+    e.stopPropagation();
+    setCropBox((prev) =>
+      prev ? { ...prev, currentX: e.clientX, currentY: e.clientY } : null
+    );
+  };
+
+  const handlePointerUpCrop = async (e: React.PointerEvent) => {
+    if (!isCropping || !cropBox) return;
+    e.stopPropagation();
+    setIsCropping(false);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+
+    const minX = Math.min(cropBox.startX, cropBox.currentX);
+    const maxX = Math.max(cropBox.startX, cropBox.currentX);
+    const minY = Math.min(cropBox.startY, cropBox.currentY);
+    const maxY = Math.max(cropBox.startY, cropBox.currentY);
+    const width = maxX - minX;
+    const height = maxY - minY;
+
+    setCropBox(null);
+
+    if (width < 20 || height < 20) {
+      return;
+    }
+
+    const imgEl = imgElementRef.current;
+    if (!imgEl) return;
+
+    const imgRect = imgEl.getBoundingClientRect();
+    const clampMinX = Math.max(imgRect.left, minX);
+    const clampMaxX = Math.min(imgRect.right, maxX);
+    const clampMinY = Math.max(imgRect.top, minY);
+    const clampMaxY = Math.min(imgRect.bottom, maxY);
+
+    if (clampMaxX - clampMinX < 15 || clampMaxY - clampMinY < 15) return;
+
+    const relX = (clampMinX - imgRect.left) / imgRect.width;
+    const relY = (clampMinY - imgRect.top) / imgRect.height;
+    const relW = (clampMaxX - clampMinX) / imgRect.width;
+    const relH = (clampMaxY - clampMinY) / imgRect.height;
+
+    const natW = imgEl.naturalWidth || imgEl.width;
+    const natH = imgEl.naturalHeight || imgEl.height;
+
+    const pixelRect = {
+      x: relX * natW,
+      y: relY * natH,
+      width: relW * natW,
+      height: relH * natH,
+    };
+
+    try {
+      const croppedBase64 = await cropDiagramArea(imgEl, pixelRect, {
+        cleanFilter: true,
+      });
+      if (croppedBase64) {
+        setPendingDiagram({
+          dataUrl: croppedBase64,
+          width: Math.round(pixelRect.width),
+          height: Math.round(pixelRect.height),
+        });
+        setIsCropMode(false);
+        if (detectedQuestions.length > 0) {
+          setSelectedTargetQuestion(detectedQuestions[0].index.toString());
+        } else {
+          setSelectedTargetQuestion("end");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to crop diagram:", err);
+    }
+  };
+
+  const handleCancelCrop = (e: React.PointerEvent) => {
+    setIsCropping(false);
+    setCropBox(null);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handleInsertDiagramToMarkdown = () => {
+    if (!pendingDiagram) return;
+
+    const imgMarkdownTag = `\n\n![几何配图](${pendingDiagram.dataUrl})\n`;
+    const lines = markdown.split("\n");
+
+    if (selectedTargetQuestion === "end" || !selectedTargetQuestion) {
+      onMarkdownChange(markdown + imgMarkdownTag);
+    } else {
+      const targetIdx = parseInt(selectedTargetQuestion, 10);
+      if (isNaN(targetIdx) || targetIdx < 0 || targetIdx >= lines.length) {
+        onMarkdownChange(markdown + imgMarkdownTag);
+      } else {
+        lines.splice(targetIdx + 1, 0, imgMarkdownTag);
+        onMarkdownChange(lines.join("\n"));
+      }
+    }
+
+    setPendingDiagram(null);
+  };
+
+  const handleCopyDiagram = async () => {
+    if (!pendingDiagram) return;
+    try {
+      const res = await fetch(pendingDiagram.dataUrl);
+      const blob = await res.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob }),
+      ]);
+      setIsCopiedDiagram(true);
+      setTimeout(() => setIsCopiedDiagram(false), 2000);
+    } catch {
+      await navigator.clipboard.writeText(pendingDiagram.dataUrl);
+      setIsCopiedDiagram(true);
+      setTimeout(() => setIsCopiedDiagram(false), 2000);
+    }
+  };
+
+  const handleDownloadDiagram = () => {
+    if (!pendingDiagram) return;
+    const a = document.createElement("a");
+    a.href = pendingDiagram.dataUrl;
+    a.download = `试卷插图_${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Strictly trap wheel & trackpad pinch gestures inside the viewport (prevents browser page zoom)
+  useEffect(() => {
+    const el = imageViewportRef.current;
+    if (!el) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      // e.preventDefault() blocks browser from zooming the entire page/windows!
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.ctrlKey || e.metaKey) {
+        // Trackpad pinch-to-zoom or Ctrl+wheel: ONLY zoom the left photo
+        const delta = e.deltaY < 0 ? 0.12 : -0.12;
+        setLeftZoom((z) =>
+          Math.max(0.5, Math.min(3.5, Math.round((z + delta) * 100) / 100))
+        );
+      } else {
+        // Trackpad 2-finger scroll or wheel: ONLY pan the left photo
+        setPan((prev) => ({
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY,
+        }));
+      }
+    };
+
+    const handleGesture = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    // Must be { passive: false } to allow e.preventDefault() to block browser-level page zoom
+    el.addEventListener("wheel", handleNativeWheel, { passive: false });
+    el.addEventListener("gesturestart", handleGesture, { passive: false });
+    el.addEventListener("gesturechange", handleGesture, { passive: false });
+    el.addEventListener("gestureend", handleGesture, { passive: false });
+
+    return () => {
+      el.removeEventListener("wheel", handleNativeWheel);
+      el.removeEventListener("gesturestart", handleGesture);
+      el.removeEventListener("gesturechange", handleGesture);
+      el.removeEventListener("gestureend", handleGesture);
+    };
+  }, []);
 
   const handlePointerDownImage = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    e.stopPropagation();
     setIsPanning(true);
     panStartRef.current = {
       clientX: e.clientX,
@@ -139,6 +448,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
 
   const handlePointerMoveImage = (e: React.PointerEvent) => {
     if (!isPanning || !panStartRef.current) return;
+    e.stopPropagation();
     const dx = e.clientX - panStartRef.current.clientX;
     const dy = e.clientY - panStartRef.current.clientY;
     setPan({
@@ -148,24 +458,12 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
   };
 
   const handlePointerUpImage = (e: React.PointerEvent) => {
+    e.stopPropagation();
     setIsPanning(false);
     panStartRef.current = null;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
-  };
-
-  const handleWheelImage = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? 0.15 : -0.15;
-      setLeftZoom((z) => Math.max(0.5, Math.min(3.5, Math.round((z + delta) * 100) / 100)));
-    } else {
-      setPan((prev) => ({
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY,
-      }));
-    }
   };
 
   const handleResetZoomAndPan = () => {
@@ -284,7 +582,31 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
+            {/* Diagram Crop Tool Toggle */}
+            <button
+              onClick={() => {
+                setIsCropMode((prev) => !prev);
+                setIsCropping(false);
+                setCropBox(null);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                isCropMode
+                  ? "bg-orange-500 text-white shadow-md shadow-orange-500/40 ring-1 ring-white/50"
+                  : "bg-[#1d2332] text-gray-300 hover:text-white hover:bg-[#273045] border border-[#2d3850]"
+              }`}
+              title={
+                isCropMode
+                  ? "点击退出截图模式"
+                  : "点击后在原图上拉框即可精准截取几何图/示意图并插入试卷"
+              }
+            >
+              <Scissors className="w-3.5 h-3.5" />
+              <span>{isCropMode ? "退出截图" : "✂️ 框选提取插图"}</span>
+            </button>
+
+            <div className="h-3.5 w-px bg-gray-700/60 mx-0.5" />
+
             <button
               onClick={() => setLeftZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))}
               className="p-1 hover:text-white"
@@ -313,27 +635,61 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
         </div>
 
         <div
-          onPointerDown={handlePointerDownImage}
-          onPointerMove={handlePointerMoveImage}
-          onPointerUp={handlePointerUpImage}
-          onPointerCancel={handlePointerUpImage}
-          onWheel={handleWheelImage}
-          onDoubleClick={handleDoubleClickImage}
+          ref={imageViewportRef}
+          onPointerDown={isCropMode ? handlePointerDownCrop : handlePointerDownImage}
+          onPointerMove={isCropMode ? handlePointerMoveCrop : handlePointerMoveImage}
+          onPointerUp={isCropMode ? handlePointerUpCrop : handlePointerUpImage}
+          onPointerCancel={isCropMode ? handleCancelCrop : handlePointerUpImage}
+          onDoubleClick={isCropMode ? undefined : handleDoubleClickImage}
           className={`flex-1 overflow-hidden relative flex items-center justify-center p-4 select-none touch-none bg-[#0a0c12] ${
-            isPanning ? "cursor-grabbing" : "cursor-grab"
+            isCropMode
+              ? "cursor-crosshair"
+              : isPanning
+              ? "cursor-grabbing"
+              : "cursor-grab"
           }`}
-          title="按住鼠标拖动平移图片，双击快速缩放，触控板/滚轮可平移"
+          title={
+            isCropMode
+              ? "按住鼠标左键在几何图上拖拽拉框即可高精度截取"
+              : "按住鼠标拖动平移图片，双击快速缩放，触控板/滚轮可平移"
+          }
         >
+          {/* Crop Mode Banner */}
+          {isCropMode && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-orange-600/90 text-white text-xs px-3.5 py-1.5 rounded-full shadow-xl pointer-events-none flex items-center gap-1.5 animate-in fade-in border border-orange-400/40 whitespace-nowrap">
+              <Scissors className="w-3.5 h-3.5 animate-pulse" />
+              <span>请在原卷几何图上按住鼠标拉框截取（松开自动增白去透印）</span>
+            </div>
+          )}
+
+          {/* Active Crop Selection Box */}
+          {isCropping && cropBox && imageViewportRef.current && (
+            <div
+              style={{
+                left:
+                  Math.min(cropBox.startX, cropBox.currentX) -
+                  imageViewportRef.current.getBoundingClientRect().left,
+                top:
+                  Math.min(cropBox.startY, cropBox.currentY) -
+                  imageViewportRef.current.getBoundingClientRect().top,
+                width: Math.abs(cropBox.currentX - cropBox.startX),
+                height: Math.abs(cropBox.currentY - cropBox.startY),
+              }}
+              className="absolute border-2 border-orange-500 bg-orange-500/25 pointer-events-none rounded z-30 shadow-lg ring-2 ring-orange-500/30"
+            />
+          )}
+
           <div
             style={{
               transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${leftZoom})`,
               transformOrigin: "center center",
-              transition: isPanning ? "none" : "transform 0.12s ease-out",
+              transition: isPanning || isCropping ? "none" : "transform 0.12s ease-out",
             }}
             className="flex items-center justify-center max-w-full max-h-full will-change-transform pointer-events-none"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
+              ref={imgElementRef}
               src={imageSrc}
               alt="Original Photo"
               draggable={false}
@@ -529,20 +885,43 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                         key={idx}
                         className="text-xl sm:text-2xl font-bold text-center text-gray-900 tracking-wide pt-2 pb-1"
                       >
-                        {trimmed.replace(/^#\s+/, "")}
+                        {renderFormattedLine(trimmed.replace(/^#\s+/, ""))}
                       </h1>
                     );
                   }
 
-                  // ## Section
+                  // ## Section or Sub-question heading
                   if (trimmed.startsWith("## ")) {
+                    const content = trimmed.replace(/^##\s+/, "");
+                    const isMajorSection =
+                      /^[一二三四五六七八九十]+[、.．]/.test(content) ||
+                      /^第[一二三四五六七八九十]+部分/.test(content) ||
+                      /^(?:选择题|填空题|解答题|计算题|证明题|练习题|综合题|根据)/.test(content);
+
+                    if (isMajorSection) {
+                      return (
+                        <h2
+                          key={idx}
+                          className="text-base sm:text-lg font-bold text-gray-900 pt-3 pb-1 border-b border-gray-200"
+                        >
+                          {renderFormattedLine(content)}
+                        </h2>
+                      );
+                    }
+
+                    // For sub-questions like "## (1) 求证..." or "## 1. ..."
+                    const isSubQuestion =
+                      /^(?:\d+[\.、]|\(\d+\)|（\d+）|[①②③④⑤⑥⑦⑧⑨⑩])/.test(content);
+
                     return (
-                      <h2
+                      <div
                         key={idx}
-                        className="text-base sm:text-lg font-bold text-gray-900 pt-3 pb-1 border-b border-gray-200"
+                        className={`text-sm sm:text-base font-bold text-gray-900 pt-2.5 pb-0.5 ${
+                          isSubQuestion ? "pl-1" : ""
+                        }`}
                       >
-                        {trimmed.replace(/^##\s+/, "")}
-                      </h2>
+                        {renderFormattedLine(content)}
+                      </div>
                     );
                   }
 
@@ -553,8 +932,20 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                         key={idx}
                         className="text-sm font-bold text-gray-900 pt-2"
                       >
-                        {trimmed.replace(/^###\s+/, "")}
+                        {renderFormattedLine(trimmed.replace(/^###\s+/, ""))}
                       </h3>
+                    );
+                  }
+
+                  // #### Sub-sub-section
+                  if (trimmed.startsWith("#### ")) {
+                    return (
+                      <h4
+                        key={idx}
+                        className="text-xs sm:text-sm font-bold text-gray-800 pt-1.5"
+                      >
+                        {renderFormattedLine(trimmed.replace(/^####\s+/, ""))}
+                      </h4>
                     );
                   }
 
@@ -565,23 +956,124 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                         key={idx}
                         className="text-xs sm:text-sm text-gray-700 text-right font-medium py-1"
                       >
-                        {trimmed.replace(/\*\*/g, "")}
+                        {renderFormattedLine(trimmed)}
+                      </div>
+                    );
+                  }
+
+                  // Markdown Image: ![alt](url)
+                  if (
+                    trimmed.startsWith("![") &&
+                    trimmed.includes("](") &&
+                    trimmed.endsWith(")")
+                  ) {
+                    const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
+                    if (imgMatch) {
+                      const alt = imgMatch[1] || "试卷插图";
+                      const src = imgMatch[2];
+                      return (
+                        <div
+                          key={idx}
+                          className="my-3 flex flex-col items-center justify-center p-2.5 rounded-xl bg-gray-50/90 border border-gray-200/90 group relative max-w-md mx-auto print:my-2 print:border-none print:p-0"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={src}
+                            alt={alt}
+                            className="max-h-60 w-auto object-contain rounded shadow-sm border border-gray-300 bg-white print:border-none print:shadow-none"
+                          />
+                          {alt && (
+                            <span className="text-[11px] text-gray-500 mt-1.5 font-medium print:text-[10px]">
+                              {alt}
+                            </span>
+                          )}
+                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-gray-900/85 p-1 rounded-lg print:hidden">
+                            <button
+                              onClick={() => {
+                                const newLines = markdown.split("\n");
+                                newLines.splice(idx, 1);
+                                onMarkdownChange(newLines.join("\n"));
+                              }}
+                              title="从试卷中删除此插图"
+                              className="p-1 text-red-300 hover:text-red-100 hover:bg-red-500/30 rounded text-xs flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>删除</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+                  }
+
+                  // Multiple Choice Options (e.g. A. ... B. ... C. ... D. ...)
+                  const choiceOptions = parseChoiceOptions(trimmed);
+                  if (choiceOptions) {
+                    const isFour = choiceOptions.length >= 4;
+                    const isTwo = choiceOptions.length === 2;
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`my-2 pl-4 sm:pl-7 text-xs sm:text-sm grid ${
+                          isFour
+                            ? "grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2"
+                            : isTwo
+                            ? "grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2.5"
+                            : "grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2"
+                        }`}
+                      >
+                        {choiceOptions.map((opt) => (
+                          <div
+                            key={opt.label}
+                            className="flex items-start gap-1.5 min-w-0"
+                          >
+                            <span className="font-bold text-gray-950 shrink-0">
+                              {opt.label}
+                            </span>
+                            <span className="text-gray-800 break-words">
+                              {renderFormattedLine(opt.text)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+
+                  // Single Option Line (e.g. "A. ...")
+                  const singleOptMatch = trimmed.match(
+                    /^([A-D][\.、．\)]|[（\(][A-D][\)）])\s*(.*)$/
+                  );
+                  if (singleOptMatch) {
+                    const label = singleOptMatch[1];
+                    const text = singleOptMatch[2];
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-1.5 pl-4 sm:pl-7 my-1.5 text-xs sm:text-sm text-gray-800"
+                      >
+                        <span className="font-bold text-gray-950 shrink-0">
+                          {label}
+                        </span>
+                        <span>{renderFormattedLine(text)}</span>
                       </div>
                     );
                   }
 
                   // Normal Question or Math Line
-                  const isNumbered = /^\d+\.\s/.test(trimmed);
-                  const cleanText = trimmed.replace(/\*\*/g, "");
+                  const isNumbered =
+                    /^(?:\d+[\.、]|\(\d+\)|（\d+）|[①②③④⑤⑥⑦⑧⑨⑩])/.test(trimmed);
 
                   return (
                     <div
                       key={idx}
-                      className={`text-xs sm:text-sm text-gray-900 font-normal leading-relaxed ${
-                        isNumbered ? "mt-3 pl-1 font-medium" : "mt-1 pl-4"
+                      className={`text-xs sm:text-sm text-gray-900 leading-relaxed ${
+                        isNumbered
+                          ? "mt-6 pt-2 pl-1 font-semibold text-gray-950 border-t border-gray-100/90 first:border-none first:pt-0 first:mt-2"
+                          : "mt-1.5 pl-4 sm:pl-6 font-normal text-gray-850"
                       }`}
                     >
-                      {renderLineWithMath(cleanText)}
+                      {renderFormattedLine(trimmed)}
                     </div>
                   );
                 })}
@@ -593,7 +1085,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
               <div className="text-xs text-gray-400 flex items-center justify-between">
                 <span>Markdown 源码编辑（修改后实时生效）:</span>
                 <span className="text-[11px] text-gray-500">
-                  支持标准 Markdown 语法与 LaTeX 公式
+                  支持标准 Markdown 语法与 LaTeX 公式及图片
                 </span>
               </div>
               <textarea
@@ -605,6 +1097,108 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
           )}
         </div>
       </div>
+
+      {/* Extracted Diagram Insert / Export Modal */}
+      {pendingDiagram && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in print:hidden">
+          <div className="bg-[#151824] border border-[#2d374d] rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#232a3b] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-orange-500/20 text-orange-400 flex items-center justify-center">
+                  <Scissors className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-gray-100">
+                    已成功提取几何插图
+                  </h3>
+                  <p className="text-[11px] text-emerald-400 flex items-center gap-1 mt-0.5">
+                    <Check className="w-3 h-3" />
+                    <span>已自动增白纸张底色、滤除背面透印与手写杂质</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPendingDiagram(null)}
+                className="p-1 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Image Preview */}
+            <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-white border border-gray-300 max-h-60 overflow-hidden shadow-inner">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={pendingDiagram.dataUrl}
+                alt="Extracted Diagram"
+                className="max-h-48 w-auto object-contain select-none"
+              />
+            </div>
+
+            {/* Target Question Selection */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
+                <span>插入到试卷位置：</span>
+                <span className="text-[10px] text-gray-500 font-normal">
+                  (共检测到 {detectedQuestions.length} 道题目)
+                </span>
+              </label>
+              <select
+                value={selectedTargetQuestion}
+                onChange={(e) => setSelectedTargetQuestion(e.target.value)}
+                className="w-full bg-[#1b2030] border border-[#313c54] text-gray-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-orange-500 cursor-pointer"
+              >
+                {detectedQuestions.length > 0 ? (
+                  detectedQuestions.map((q, qIdx) => (
+                    <option key={qIdx} value={q.index}>
+                      插入到 {q.title} 下方
+                    </option>
+                  ))
+                ) : (
+                  <option value="end">直接追加到试卷末尾</option>
+                )}
+                <option value="end">追加到试卷末尾</option>
+              </select>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-between pt-2 border-t border-[#232a3b]">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopyDiagram}
+                  className="px-3 py-2 rounded-xl bg-[#1f2638] hover:bg-[#28324a] text-gray-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{isCopiedDiagram ? "已复制！" : "复制图片"}</span>
+                </button>
+                <button
+                  onClick={handleDownloadDiagram}
+                  className="px-3 py-2 rounded-xl bg-[#1f2638] hover:bg-[#28324a] text-gray-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>下载单图</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPendingDiagram(null)}
+                  className="px-3 py-2 rounded-xl text-xs font-medium text-gray-400 hover:text-gray-200"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleInsertDiagramToMarkdown}
+                  className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-orange-500/25 transition active:scale-95"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>一键插入试卷</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

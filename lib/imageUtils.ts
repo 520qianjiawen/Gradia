@@ -311,6 +311,94 @@ export async function cropQuestionArea(
 }
 
 /**
+ * Crops a diagram/geometric illustration from the source image at full native resolution,
+ * applying scanner whitening, bleed-through suppression, and contrast boosting.
+ */
+export async function cropDiagramArea(
+  imageSource: HTMLImageElement | string,
+  targetRect:
+    | { x: number; y: number; width: number; height: number }
+    | [number, number, number, number],
+  options: {
+    cleanFilter?: boolean;
+    contrast?: number;
+    padding?: number;
+  } = {}
+): Promise<string> {
+  let img: HTMLImageElement;
+  if (typeof imageSource === "string") {
+    img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = imageSource;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+  } else {
+    img = imageSource;
+  }
+
+  const naturalWidth = img.naturalWidth || img.width;
+  const naturalHeight = img.naturalHeight || img.height;
+  if (!naturalWidth || !naturalHeight) return "";
+
+  let pixelX = 0,
+    pixelY = 0,
+    pixelW = 0,
+    pixelH = 0;
+
+  if (Array.isArray(targetRect)) {
+    // [ymin, xmin, ymax, xmax] in 0..1000 scale
+    const [ymin, xmin, ymax, xmax] = targetRect;
+    pixelX = Math.round((xmin / 1000) * naturalWidth);
+    pixelY = Math.round((ymin / 1000) * naturalHeight);
+    pixelW = Math.round(((xmax - xmin) / 1000) * naturalWidth);
+    pixelH = Math.round(((ymax - ymin) / 1000) * naturalHeight);
+  } else {
+    pixelX = Math.round(targetRect.x);
+    pixelY = Math.round(targetRect.y);
+    pixelW = Math.round(targetRect.width);
+    pixelH = Math.round(targetRect.height);
+  }
+
+  const padding = options.padding ?? 8;
+  pixelX = Math.max(0, pixelX - padding);
+  pixelY = Math.max(0, pixelY - padding);
+  pixelW = Math.min(naturalWidth - pixelX, pixelW + padding * 2);
+  pixelH = Math.min(naturalHeight - pixelY, pixelH + padding * 2);
+
+  if (pixelW <= 5 || pixelH <= 5) return "";
+
+  const canvas = document.createElement("canvas");
+  canvas.width = pixelW;
+  canvas.height = pixelH;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return "";
+
+  ctx.drawImage(
+    img,
+    pixelX,
+    pixelY,
+    pixelW,
+    pixelH,
+    0,
+    0,
+    pixelW,
+    pixelH
+  );
+
+  if (options.cleanFilter !== false) {
+    const scanned = applyDocumentScanFilter(canvas, {
+      contrast: options.contrast || 1.35,
+      cropDeskEdges: false,
+    });
+    return scanned.toDataURL("image/png");
+  }
+
+  return canvas.toDataURL("image/png");
+}
+
+/**
  * Generates an A4 PDF for printable homework correction / practice sheets (with answer lines)
  */
 export async function exportHomeworkPdf(

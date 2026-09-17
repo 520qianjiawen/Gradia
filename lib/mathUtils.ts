@@ -107,9 +107,43 @@ export function renderLatexToHtml(
     const html = katex.renderToString(cleaned, {
       throwOnError: false,
       displayMode,
+      strict: "ignore",
     });
     return { html };
   } catch {
     return { fallback: latexToReadableUnicode(cleaned) };
   }
 }
+
+export interface ChoiceOption {
+  label: string;
+  text: string;
+}
+
+/**
+ * Parses multiple choice options from a line (e.g. "A. 红光 B. 绿光 C. 蓝光 D. 白光" or "A. 黑皮 B. 红皮")
+ */
+export function parseChoiceOptions(line: string): ChoiceOption[] | null {
+  const trimmed = line.trim();
+  const choicePattern = /(?:^|\s+)([A-D][\.、．\)]|[（\(][A-D][\)）])\s*/g;
+  const matches: RegExpExecArray[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = choicePattern.exec(trimmed)) !== null) {
+    matches.push(m);
+  }
+
+  if (matches.length >= 2) {
+    const options: ChoiceOption[] = [];
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const label = match[1];
+      const start = match.index + match[0].length;
+      const end = i < matches.length - 1 ? matches[i + 1].index : trimmed.length;
+      const text = trimmed.slice(start, end).trim();
+      options.push({ label, text });
+    }
+    return options;
+  }
+  return null;
+}
+
