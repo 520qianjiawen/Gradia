@@ -203,7 +203,7 @@ export const QuestionSidebar: React.FC<QuestionSidebarProps> = ({
           className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 active:scale-[0.98] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-orange-500/25 transition"
         >
           <Printer className="w-4 h-4" />
-          <span>导出 A4 打印卷 / 订正本</span>
+          <span>导出错题本</span>
         </button>
       </div>
     </aside>

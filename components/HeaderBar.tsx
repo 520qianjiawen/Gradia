@@ -7,7 +7,6 @@ import {
   Upload,
   FileDown,
   Sliders,
-  FileText,
   Layers,
   FileSpreadsheet,
 } from "lucide-react";
@@ -23,7 +22,7 @@ interface HeaderBarProps {
   onOpenCleanSettings: () => void;
   onOpenExportPdf: () => void;
   onUploadImage: (file: File) => void;
-  onSelectSample: (sampleKey: "blank_english" | "math_graded") => void;
+  onSelectSample?: (sampleKey: "blank_english" | "math_graded") => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -82,7 +81,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             }`}
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>试卷转电子版 (Markdown/Word)</span>
+            <span>试卷转电子版</span>
           </button>
 
           <button
@@ -97,32 +96,6 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <span>错题切片订正</span>
           </button>
         </div>
-      </div>
-
-      {/* Center: Sample switcher */}
-      <div className="hidden xl:flex items-center gap-2 bg-[#161a25] p-1 rounded-xl border border-[#232b3c]">
-        <span className="text-[11px] text-gray-400 px-2">快速载入样例:</span>
-        <button
-          onClick={() => onSelectSample("blank_english")}
-          className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-            currentImageName.includes("blank")
-              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm"
-              : "text-gray-400 hover:text-gray-200"
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>英语默写卷 (拍照原卷)</span>
-        </button>
-        <button
-          onClick={() => onSelectSample("math_graded")}
-          className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-            currentImageName.includes("homework")
-              ? "bg-orange-500/20 text-orange-300 border border-orange-500/40 shadow-sm"
-              : "text-gray-400 hover:text-gray-200"
-          }`}
-        >
-          <span>数学作业 (错题批改)</span>
-        </button>
       </div>
 
       {/* Right: Actions */}

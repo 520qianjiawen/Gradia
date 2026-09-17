@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useRef } from "react";
-import { RefreshCw, PlusSquare, Sliders, ImagePlus, Scan } from "lucide-react";
+import { RefreshCw, PlusSquare, Sliders, ImagePlus } from "lucide-react";
 
 interface ToolbarProps {
   isAnalyzing: boolean;
   isDrawingNewBox: boolean;
-  isScannerActive: boolean;
-  onToggleScanner: () => void;
+  isScannerActive?: boolean;
+  onToggleScanner?: () => void;
   onReanalyze: () => void;
   onToggleDrawingNewBox: () => void;
   onOpenCleanSettings: () => void;
@@ -53,20 +53,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className={`w-3.5 h-3.5 text-gray-300 ${isAnalyzing ? "animate-spin text-orange-400" : ""}`}
         />
         <span>重新识别</span>
-      </button>
-
-      {/* 试卷去阴影/扫描增强 */}
-      <button
-        onClick={onToggleScanner}
-        title="针对拍照试卷：一键去黄、去阴影、纯白底化"
-        className={`flex-1 py-2.5 px-1.5 rounded-xl border flex items-center justify-center gap-1 transition font-medium ${
-          isScannerActive
-            ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm"
-            : "bg-[#1e2332] hover:bg-[#282f42] border-[#2d3448] text-gray-200"
-        }`}
-      >
-        <Scan className={`w-3.5 h-3.5 ${isScannerActive ? "text-emerald-400" : "text-gray-300"}`} />
-        <span>{isScannerActive ? "已去阴影" : "去拍照阴影"}</span>
       </button>
 
       {/* 手动加框 */}

@@ -7,11 +7,12 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Scan,
   Eraser,
-  PlusSquare,
   RefreshCw,
+  PlusSquare,
   Plus,
+  Sliders,
+  Check,
   X,
 } from "lucide-react";
 
@@ -28,7 +29,7 @@ interface CanvasEditorProps {
   onQuestionsChange: (newQuestions: QuestionBox[]) => void;
   onToggleDrawingNewBox: () => void;
   onStopDrawing: () => void;
-  onToggleScanner: () => void;
+  onToggleScanner?: () => void;
   onToggleHandwriting: () => void;
   onReanalyze: () => void;
 }
@@ -485,19 +486,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         </div>
 
         {/* Feature toggles */}
-        <button
-          onClick={onToggleScanner}
-          className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 transition font-medium ${
-            cleanSettings.scannerFilter
-              ? "bg-emerald-500/20 border-emerald-500 text-emerald-300"
-              : "bg-[#1b2130] border-[#2b344a] text-gray-300 hover:text-white"
-          }`}
-          title="消除手机拍照阴影与发黄光斑，将纸面纯白化"
-        >
-          <Scan className="w-3.5 h-3.5" />
-          <span>{cleanSettings.scannerFilter ? "已去阴影" : "去拍照阴影"}</span>
-        </button>
-
         <button
           onClick={onToggleHandwriting}
           className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 transition font-medium ${

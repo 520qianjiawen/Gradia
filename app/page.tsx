@@ -75,7 +75,7 @@ export default function HomeworkCorrectorPage() {
     contrastBoost: 1.3,
     removeGradesMark: true,
     highlightWrongOnly: false,
-    scannerFilter: true,
+    scannerFilter: false,
     deskCrop: true,
   });
 
@@ -313,7 +313,7 @@ export default function HomeworkCorrectorPage() {
       setCleanSettings((prev) => ({
         ...prev,
         eraseHandwriting: false,
-        scannerFilter: true,
+        scannerFilter: false,
       }));
     } else {
       setImageSrc("/samples/sample_homework.png");
@@ -506,6 +506,10 @@ export default function HomeworkCorrectorPage() {
         imageSrc={imageSrc}
         cleanSettings={cleanSettings}
         onClose={() => setIsExportPdfOpen(false)}
+        onSwitchToDigitize={() => {
+          setIsExportPdfOpen(false);
+          setCurrentMode("digitize_doc");
+        }}
       />
     </main>
   );
