@@ -94,7 +94,9 @@ export function applyDocumentScanFilter(
   const len = d.length;
 
   // Estimate local illumination gradient by creating a coarse background map
-  // Step 1: Calculate block-based average luminance (block size ~ 32x32)
+  // Step 1: Calculate block-based paper background luminance (block size ~ 32x32)
+  // CRITICAL: We estimate the 85th percentile (paper brightness), NOT a simple average!
+  // Simple averaging includes dark ink, dragging down bgLum and causing line bleaching.
   const blockSize = 32;
   const blocksX = Math.ceil(canvas.width / blockSize);
   const blocksY = Math.ceil(canvas.height / blockSize);
@@ -102,23 +104,27 @@ export function applyDocumentScanFilter(
 
   for (let by = 0; by < blocksY; by++) {
     for (let bx = 0; bx < blocksX; bx++) {
-      let sum = 0;
-      let count = 0;
+      const blockLums: number[] = [];
       const startX = bx * blockSize;
       const endX = Math.min(canvas.width, (bx + 1) * blockSize);
       const startY = by * blockSize;
       const endY = Math.min(canvas.height, (by + 1) * blockSize);
 
-      // Sample upper 70th percentile roughly by averaging brighter pixels
       for (let y = startY; y < endY; y += 2) {
         for (let x = startX; x < endX; x += 2) {
           const idx = (y * canvas.width + x) * 4;
           const lum = 0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2];
-          sum += lum;
-          count++;
+          blockLums.push(lum);
         }
       }
-      bgMap[by * blocksX + bx] = count > 0 ? sum / count : 200;
+
+      if (blockLums.length > 0) {
+        blockLums.sort((a, b) => a - b);
+        const p85 = blockLums[Math.floor(blockLums.length * 0.85)];
+        bgMap[by * blocksX + bx] = Math.max(120, p85);
+      } else {
+        bgMap[by * blocksX + bx] = 200;
+      }
     }
   }
 
@@ -143,7 +149,7 @@ export function applyDocumentScanFilter(
       if (options.eraseHandwriting) {
         const maxC = Math.max(r, g, b);
         const minC = Math.min(r, g, b);
-        if (maxC - minC > 14) {
+        if (maxC - minC >= 25) {
           d[idx] = 255;
           d[idx + 1] = 255;
           d[idx + 2] = 255;
@@ -154,8 +160,8 @@ export function applyDocumentScanFilter(
       // Illumination ratio: (current / bg)
       const ratio = currentLum / bgLum;
 
-      // When eraseHandwriting is true, use aggressive ratio (0.73 vs 0.88) to wipe out pencil marks
-      const cutoff = options.eraseHandwriting ? 0.73 : 0.88;
+      // Scanner bleaching cutoff: paper (> 0.86) becomes pure white, lines (<= 0.86) stay crisp black
+      const cutoff = options.eraseHandwriting ? 0.86 : 0.88;
 
       if (ratio > cutoff) {
         // Pure white paper background
@@ -165,17 +171,10 @@ export function applyDocumentScanFilter(
       } else {
         // Printed text / sharp geometry lines: enhance blackness
         const darkened = Math.max(0, Math.min(255, (currentLum - 128) * contrastFactor + 80));
-        // If it's faint ink/pencil in eraseHandwriting mode, suppress it to white
-        if (options.eraseHandwriting && darkened > 120) {
-          d[idx] = 255;
-          d[idx + 1] = 255;
-          d[idx + 2] = 255;
-        } else {
-          const finalInk = darkened < 140 ? Math.round(darkened * 0.7) : darkened;
-          d[idx] = finalInk;
-          d[idx + 1] = finalInk;
-          d[idx + 2] = finalInk;
-        }
+        const finalInk = darkened < 140 ? Math.round(darkened * 0.7) : darkened;
+        d[idx] = finalInk;
+        d[idx + 1] = finalInk;
+        d[idx + 2] = finalInk;
       }
     }
   }

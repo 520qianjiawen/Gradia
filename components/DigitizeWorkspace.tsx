@@ -177,9 +177,13 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
   const [selectedTargetQuestion, setSelectedTargetQuestion] = useState<string>("");
   const [isCopiedDiagram, setIsCopiedDiagram] = useState(false);
   const [replacingDiagramLineIdx, setReplacingDiagramLineIdx] = useState<number | null>(null);
+  const [replacingDiagramSrc, setReplacingDiagramSrc] = useState<string | null>(null);
 
-  const handleStartReplaceDiagram = (lineIdx: number) => {
+  const handleStartReplaceDiagram = (lineIdx: number, currentSrc?: string) => {
     setReplacingDiagramLineIdx(lineIdx);
+    if (currentSrc) {
+      setReplacingDiagramSrc(currentSrc);
+    }
     setIsCropMode(true);
     if (isDesktop && splitPercent < 30) {
       setSplitPercent(50);
@@ -332,13 +336,21 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
         eraseHandwriting: true,
       });
       if (croppedBase64) {
-        if (replacingDiagramLineIdx !== null) {
+        if (replacingDiagramLineIdx !== null || replacingDiagramSrc !== null) {
           const lines = markdown.split("\n");
-          if (replacingDiagramLineIdx >= 0 && replacingDiagramLineIdx < lines.length) {
-            lines[replacingDiagramLineIdx] = `\n\n![几何配图](${croppedBase64})\n`;
+          let targetIdx = replacingDiagramLineIdx;
+          if (replacingDiagramSrc) {
+            const foundIdx = lines.findIndex((l) => l.includes(replacingDiagramSrc));
+            if (foundIdx !== -1) {
+              targetIdx = foundIdx;
+            }
+          }
+          if (targetIdx !== null && targetIdx >= 0 && targetIdx < lines.length) {
+            lines[targetIdx] = `![几何配图](${croppedBase64})`;
             onMarkdownChange(lines.join("\n"));
           }
           setReplacingDiagramLineIdx(null);
+          setReplacingDiagramSrc(null);
           setIsCropMode(false);
         } else {
           setPendingDiagram({
@@ -363,6 +375,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
     setIsCropping(false);
     setCropBox(null);
     setReplacingDiagramLineIdx(null);
+    setReplacingDiagramSrc(null);
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
@@ -621,7 +634,10 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
             <button
               onClick={() => {
                 setIsCropMode((prev) => {
-                  if (prev) setReplacingDiagramLineIdx(null);
+                  if (prev) {
+                    setReplacingDiagramLineIdx(null);
+                    setReplacingDiagramSrc(null);
+                  }
                   return !prev;
                 });
                 setIsCropping(false);
@@ -706,6 +722,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                   e.stopPropagation();
                   setIsCropMode(false);
                   setReplacingDiagramLineIdx(null);
+                  setReplacingDiagramSrc(null);
                   setCropBox(null);
                 }}
                 className="ml-1 px-2 py-0.5 bg-black/30 hover:bg-black/50 text-[11px] rounded-md font-bold transition-colors cursor-pointer"
@@ -1035,7 +1052,9 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                     if (imgMatch) {
                       const alt = imgMatch[1] || "试卷插图";
                       const src = imgMatch[2];
-                      const isTargetBeingReplaced = replacingDiagramLineIdx === idx;
+                      const isTargetBeingReplaced =
+                        replacingDiagramLineIdx === idx ||
+                        (replacingDiagramSrc !== null && src === replacingDiagramSrc);
                       return (
                         <div
                           key={idx}
@@ -1045,7 +1064,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                           <img
                             src={src}
                             alt=""
-                            onClick={() => handleStartReplaceDiagram(idx)}
+                            onClick={() => handleStartReplaceDiagram(idx, src)}
                             title="点击可直接在左侧原图上重新框选截取此插图"
                             className={`max-h-64 w-auto object-contain bg-white cursor-pointer transition-all duration-150 ${
                               isTargetBeingReplaced
@@ -1059,7 +1078,7 @@ export const DigitizeWorkspace: React.FC<DigitizeWorkspaceProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleStartReplaceDiagram(idx);
+                                handleStartReplaceDiagram(idx, src);
                               }}
                               title="在左侧原图上按住鼠标重新拉框，松开后自动替换此插图"
                               className="px-2 py-0.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-[11px] font-medium flex items-center gap-1 transition-colors shadow-sm"
