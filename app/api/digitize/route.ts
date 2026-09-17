@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DIGITIZE_VISION_PROMPT } from "@/lib/digitizePrompt";
+import { getDigitizeVisionPrompt } from "@/lib/digitizePrompt";
 
 export const maxDuration = 60;
 
@@ -8,7 +8,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { imageBase64, apiKey, model = "inclusionai/ling-3.0-flash-vl:free" } = body;
+    const {
+      imageBase64,
+      apiKey,
+      model = "inclusionai/ling-3.0-flash-vl:free",
+      eraseHandwriting = true,
+    } = body;
 
     if (!imageBase64) {
       return NextResponse.json(
@@ -35,6 +40,8 @@ export async function POST(req: NextRequest) {
       formattedImageUrl = `data:image/jpeg;base64,${imageBase64}`;
     }
 
+    const promptText = getDigitizeVisionPrompt(eraseHandwriting !== false);
+
     const payload = {
       model: model,
       messages: [
@@ -43,7 +50,7 @@ export async function POST(req: NextRequest) {
           content: [
             {
               type: "text",
-              text: DIGITIZE_VISION_PROMPT,
+              text: promptText,
             },
             {
               type: "image_url",

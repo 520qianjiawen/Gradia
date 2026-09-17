@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { HeaderBar } from "@/components/HeaderBar";
 import { CanvasEditor } from "@/components/CanvasEditor";
 import { QuestionSidebar } from "@/components/QuestionSidebar";
@@ -10,7 +10,11 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { ExportPdfModal } from "@/components/ExportPdfModal";
 import { QuestionBox, CleanSettings } from "@/types/homework";
 import { SAMPLE_HOMEWORK_RESULT } from "@/lib/mockData";
-import { SAMPLE_BLANK_TEST_MARKDOWN } from "@/lib/sampleMarkdown";
+import {
+  SAMPLE_BLANK_TEST_MARKDOWN,
+  SAMPLE_MATH_BLANK_MARKDOWN,
+  SAMPLE_MATH_WITH_HANDWRITING_MARKDOWN,
+} from "@/lib/sampleMarkdown";
 import { compressImageForUpload } from "@/lib/imageUtils";
 import { AlertCircle, X } from "lucide-react";
 
@@ -51,6 +55,7 @@ export default function HomeworkCorrectorPage() {
     SAMPLE_BLANK_TEST_MARKDOWN
   );
   const [isDigitizing, setIsDigitizing] = useState(false);
+  const [eraseHandwriting, setEraseHandwriting] = useState<boolean>(true); // 默认打勾：移除手写笔记
 
   // Questions for Crop & Correction Mode
   const [questions, setQuestions] = useState<QuestionBox[]>(
@@ -83,6 +88,49 @@ export default function HomeworkCorrectorPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Draggable sidebar for crop_correct mode
+  const cropContainerRef = useRef<HTMLDivElement>(null);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(384);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
+  const [isDesktop, setIsDesktop] = useState<boolean>(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    setIsDesktop(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const handleSidebarPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsDraggingSidebar(true);
+  };
+
+  useEffect(() => {
+    if (!isDraggingSidebar) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!cropContainerRef.current) return;
+      const rect = cropContainerRef.current.getBoundingClientRect();
+      const newWidth = rect.right - e.clientX;
+      setSidebarWidth(Math.max(260, Math.min(650, newWidth)));
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingSidebar(false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [isDraggingSidebar]);
 
   // Sync saved model choice
   useEffect(() => {
@@ -117,7 +165,7 @@ export default function HomeworkCorrectorPage() {
   }, []);
 
   // Digitize API call (Photo -> Markdown)
-  const runDigitize = async (imgBase64: string) => {
+  const runDigitize = async (imgBase64: string, erase: boolean = eraseHandwriting) => {
     setIsDigitizing(true);
     setErrorMessage(null);
 
@@ -139,6 +187,7 @@ export default function HomeworkCorrectorPage() {
           imageBase64: imgBase64,
           apiKey,
           model,
+          eraseHandwriting: erase,
         }),
       });
 
@@ -156,6 +205,23 @@ export default function HomeworkCorrectorPage() {
       setErrorMessage(msg);
     } finally {
       setIsDigitizing(false);
+    }
+  };
+
+  // Toggle erase handwriting in Digitize mode
+  const handleToggleEraseHandwriting = (val: boolean) => {
+    setEraseHandwriting(val);
+
+    // If currently on demo sample "math_graded", switch between blank test vs with handwriting instantly:
+    if (imageSrc.includes("sample_homework")) {
+      if (val) {
+        setDigitizedMarkdown(SAMPLE_MATH_BLANK_MARKDOWN);
+      } else {
+        setDigitizedMarkdown(SAMPLE_MATH_WITH_HANDWRITING_MARKDOWN);
+      }
+    } else if (imageSrc.startsWith("data:") || imageSrc.startsWith("blob:")) {
+      // For uploaded images, re-run digitize with the new setting
+      runDigitize(imageSrc, val);
     }
   };
 
@@ -252,24 +318,11 @@ export default function HomeworkCorrectorPage() {
     } else {
       setImageSrc("/samples/sample_homework.png");
       setQuestions(SAMPLE_HOMEWORK_RESULT.questions);
-      setDigitizedMarkdown(`# 数学作业：方向与位置练习卷
-
-**姓名: ________________    得分: ________**
-
----
-
-## 练习题
-
-1. 在老虎馆、猩猩馆、狮林这三个场所中任选一个，描述它的位置。  
-   ____________________________________________________________________________
-
-2. 描述位置时，需要明确的三个要素是（方向）、（角度）和（距离）。
-
-3. 若蛇馆在大象馆的南偏东 25° 方向 300m 处，则大象馆在蛇馆的（________________）方向（________）m 处。
-
-4. 一艘渔船在海上遇险，向搜救中心发出求救信号。搜救中心的信号显示，渔船的位置如下图。请写一写，渔船向搜救中心发出了怎样的信号？  
-   ____________________________________________________________________________
-`);
+      setDigitizedMarkdown(
+        eraseHandwriting
+          ? SAMPLE_MATH_BLANK_MARKDOWN
+          : SAMPLE_MATH_WITH_HANDWRITING_MARKDOWN
+      );
       setCleanSettings((prev) => ({
         ...prev,
         eraseHandwriting: true,
@@ -358,12 +411,19 @@ export default function HomeworkCorrectorPage() {
           imageSrc={imageSrc}
           markdown={digitizedMarkdown}
           isDigitizing={isDigitizing}
+          eraseHandwriting={eraseHandwriting}
+          onToggleEraseHandwriting={handleToggleEraseHandwriting}
           onMarkdownChange={setDigitizedMarkdown}
-          onRedigitize={() => runDigitize(imageSrc)}
+          onRedigitize={() => runDigitize(imageSrc, eraseHandwriting)}
         />
       ) : (
         /* 模式二：错题切片与订正画布 */
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        <div
+          ref={cropContainerRef}
+          className={`flex-1 flex flex-col lg:flex-row overflow-hidden relative ${
+            isDraggingSidebar ? "select-none cursor-col-resize" : ""
+          }`}
+        >
           <CanvasEditor
             imageSrc={imageSrc}
             questions={displayedQuestions}
@@ -390,6 +450,27 @@ export default function HomeworkCorrectorPage() {
             onReanalyze={() => runAnalysis(imageSrc)}
           />
 
+          {/* Draggable Divider Handle (Desktop) */}
+          <div
+            onPointerDown={handleSidebarPointerDown}
+            onDoubleClick={() => setSidebarWidth(384)}
+            title="按住左右拖拽调节侧边栏宽度，双击恢复默认宽度"
+            className={`hidden lg:flex w-2 bg-[#141824] hover:bg-orange-500 active:bg-orange-500 cursor-col-resize items-center justify-center transition-colors relative z-30 select-none group shrink-0 ${
+              isDraggingSidebar
+                ? "bg-orange-500 shadow-lg shadow-orange-500/50"
+                : "hover:shadow-md border-x border-[#1f2433]"
+            }`}
+          >
+            <div className="w-1 h-8 rounded-full bg-gray-600 group-hover:bg-white transition-colors" />
+
+            {/* Floating Width Pill while dragging */}
+            {isDraggingSidebar && (
+              <div className="absolute top-4 right-1/2 translate-x-1/2 bg-gray-900/95 border border-orange-500/80 text-orange-300 font-mono text-[11px] px-2.5 py-1 rounded-full shadow-xl pointer-events-none whitespace-nowrap z-50 animate-in fade-in">
+                {Math.round(sidebarWidth)}px
+              </div>
+            )}
+          </div>
+
           <QuestionSidebar
             questions={questions}
             activeBoxId={activeBoxId}
@@ -400,6 +481,7 @@ export default function HomeworkCorrectorPage() {
             onDelete={handleDeleteBox}
             onToggleWrongFilter={() => setSelectedWrongOnly(!selectedWrongOnly)}
             onOpenExportPdf={() => setIsExportPdfOpen(true)}
+            width={isDesktop ? sidebarWidth : undefined}
           />
         </div>
       )}

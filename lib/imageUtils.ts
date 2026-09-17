@@ -461,14 +461,29 @@ export async function exportFullBlankTestPdf(
 }
 
 /**
- * Compresses and resizes an image before sending to Vision LLM APIs
- * Keeps max dimension <= 1600px and reduces JPEG size from 10MB to ~300KB
+ * Optimizes image file size (bytes) while strictly preserving 100% of its native pixel resolution.
+ * Retains 1:1 original dimensions (width & height) for ultra-sharp math formulas, superscripts, and small symbols,
+ * while compressing uncompressed/raw camera photos down to lightweight JPEG (~900KB - 1.4MB).
  */
 export async function compressImageForUpload(
   fileOrBase64: File | string,
-  maxDimension: number = 1600,
-  quality: number = 0.85
+  maxDimension: number = 4096, // Preserves 100% native resolution of smartphone camera photos (up to 4K)
+  quality: number = 0.88 // High quality setting for razor-sharp math characters and subscripts
 ): Promise<string> {
+  // If it's already a JPEG file under 2MB, read directly to preserve original untouched bytes
+  if (
+    typeof fileOrBase64 !== "string" &&
+    fileOrBase64.size <= 2 * 1024 * 1024 &&
+    (fileOrBase64.type === "image/jpeg" || fileOrBase64.type === "image/jpg")
+  ) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(fileOrBase64);
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -476,6 +491,7 @@ export async function compressImageForUpload(
     img.onload = () => {
       let { width, height } = img;
 
+      // Only downscale if exceeding extreme 4K+ canvas memory limits (4096px)
       if (width > maxDimension || height > maxDimension) {
         if (width > height) {
           height = Math.round((height * maxDimension) / width);

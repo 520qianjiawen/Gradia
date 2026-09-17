@@ -7,6 +7,7 @@ import {
   Packer,
   BorderStyle,
 } from "docx";
+import { latexToReadableUnicode } from "./mathUtils";
 
 /**
  * Converts Markdown exam paper text into a professional Word (.docx) document and downloads it
@@ -137,7 +138,7 @@ export async function exportMarkdownToDocx(
         },
         children: [
           new TextRun({
-            text: rawLine.replace(/\*\*/g, ""),
+            text: latexToReadableUnicode(rawLine.replace(/\*\*/g, "")),
             size: 22, // 11pt
             color: "1F2937",
             font: "Calibri",

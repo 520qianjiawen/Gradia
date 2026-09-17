@@ -24,6 +24,7 @@ interface QuestionSidebarProps {
   onDelete: (id: string) => void;
   onToggleWrongFilter: () => void;
   onOpenExportPdf: () => void;
+  width?: number;
 }
 
 export const QuestionSidebar: React.FC<QuestionSidebarProps> = ({
@@ -36,6 +37,7 @@ export const QuestionSidebar: React.FC<QuestionSidebarProps> = ({
   onDelete,
   onToggleWrongFilter,
   onOpenExportPdf,
+  width,
 }) => {
   const wrongCount = questions.filter((q) => q.is_wrong).length;
   const filteredQuestions = selectedWrongOnly
@@ -43,7 +45,12 @@ export const QuestionSidebar: React.FC<QuestionSidebarProps> = ({
     : questions;
 
   return (
-    <aside className="w-full lg:w-96 border-t lg:border-t-0 lg:border-l border-[#1f2433] bg-[#11131a] flex flex-col h-[40vh] lg:h-full z-20 select-none">
+    <aside
+      style={width ? { width: `${width}px` } : undefined}
+      className={`w-full ${
+        width ? "" : "lg:w-96"
+      } border-t lg:border-t-0 border-[#1f2433] bg-[#11131a] flex flex-col h-[40vh] lg:h-full z-20 select-none shrink-0`}
+    >
       {/* Sidebar Header: Overview Stats */}
       <div className="p-4 border-b border-[#1f2433] bg-[#141822]">
         <div className="flex items-center justify-between mb-3">
